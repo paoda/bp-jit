@@ -1,4 +1,5 @@
 const std = @import("std");
+const Sdk = @import("lib/SDL.zig/Sdk.zig");
 
 pub fn build(b: *std.build.Builder) void {
     // Standard target options allows the person running `zig build` to choose
@@ -11,8 +12,20 @@ pub fn build(b: *std.build.Builder) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
-    const exe = b.addExecutable("bp", "src/main.zig");
+    const exe = b.addExecutable("bp-jit", "src/main.zig");
     exe.setTarget(target);
+
+    // Argument Parsing
+    exe.addPackagePath("clap", "lib/zig-clap/clap.zig");
+
+    // OpenGL 3.3. Bindings
+    exe.addPackagePath("gl", "lib/gl.zig");
+
+    // SDL2 Bindings
+    const sdk = Sdk.init(b);
+    sdk.link(exe, .dynamic);
+    exe.addPackage(sdk.getNativePackage("sdl2"));
+
     exe.setBuildMode(mode);
     exe.install();
 

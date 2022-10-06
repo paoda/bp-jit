@@ -1,24 +1,44 @@
 const std = @import("std");
+const clap = @import("clap");
+
+const Gui = @import("platform.zig").Gui;
+const BytePusher = @import("BytePusher.zig");
+
+const params = clap.parseParamsComptime(
+    \\-h, --help    Display this help and exit.
+    \\<str>...     Path to BytePusher ROM  
+    \\
+);
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    defer std.debug.assert(!gpa.deinit());
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    const stderr = std.io.getStdErr().writer();
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+    var diag = clap.Diagnostic{};
+    var res = clap.parse(clap.Help, &params, clap.parsers.default, .{ .diagnostic = &diag }) catch |err| {
+        diag.report(stderr, err) catch {};
+        return err;
+    };
+    defer res.deinit();
 
-    try bw.flush(); // don't forget to flush!
-}
+    for (res.positionals) |pos| std.debug.print("{s}", .{pos});
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+    switch (res.positionals.len) {
+        0 => try stderr.print("user did not provide a file path as an argument", .{}),
+        else => {
+            if (res.positionals.len > 1) try stderr.print("did not expect more than 1 argument (note: saw {})", .{res.positionals.len});
+            const path = res.positionals[0];
+
+            var gui = try Gui.init(allocator);
+            defer gui.deinit();
+
+            var bp = try BytePusher.init(allocator, path);
+            defer bp.deinit();
+
+            gui.run(&bp);
+        },
+    }
 }
