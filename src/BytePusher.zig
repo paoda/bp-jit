@@ -1,14 +1,16 @@
 const std = @import("std");
+const JitCompiler = @import("JitCompiler.zig");
 
 const Allocator = std.mem.Allocator;
 
 const Self = @This();
 const log = std.log.scoped(.BytePusher);
-const mem_size = 0x0100_0008; // 16 MiB
+pub const mem_size = 0x0100_0008; // 16 MiB
 
 pc: u24,
 memory: *[mem_size]u8,
 allocator: Allocator,
+jit: JitCompiler,
 
 pub fn init(allocator: Allocator, path: []const u8) !Self {
     const memory = try allocator.create([mem_size]u8);
@@ -23,18 +25,21 @@ pub fn init(allocator: Allocator, path: []const u8) !Self {
         .pc = 0x000000,
         .allocator = allocator,
         .memory = memory,
+        .jit = try JitCompiler.init(allocator),
     };
 }
 
 pub fn deinit(self: *Self) void {
+    self.jit.deinit();
     self.allocator.destroy(self.memory);
+    self.* = undefined;
 }
 
 pub fn fetch(self: *Self) u24 {
     return self.read(u24, 0x000002);
 }
 
-fn read(self: *const Self, comptime T: type, addr: u24) T {
+pub fn read(self: *const Self, comptime T: type, addr: u24) T {
     return switch (T) {
         u24, u16, u8 => std.mem.readIntSliceBig(T, self.memory[addr..][0..@sizeOf(T)]),
         else => @compileError("bus: unsupported read width"),

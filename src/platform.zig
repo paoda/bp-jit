@@ -86,7 +86,8 @@ pub const Gui = struct {
         _ = generateTexture(self.framebuffer.get(.Host));
 
         emu_loop: while (true) {
-            emu.runFrame(bp, &self.framebuffer);
+            emu.jit.runFrame(bp, &self.framebuffer);
+            // emu.interpreter.runFrame(bp, &self.framebuffer);
 
             var event: SDL.SDL_Event = undefined;
             while (SDL.SDL_PollEvent(&event) != 0) {
