@@ -26,9 +26,8 @@ pub const jit = struct {
         bp.pc = bp.fetch();
 
         var cycles: u32 = 0;
-        while (cycles < cycles_per_frame) : (cycles += 1) {
-            // FIXME: If I execute more than 1 instruction here, I break the whole "cycles per frame" thing here
-            bp.jit.compile(bp) catch |e| std.debug.panic("JIT compilation failed: {}", .{e});
+        while (cycles < cycles_per_frame) {
+            cycles += bp.jit.compile(bp) catch |e| std.debug.panic("JIT compilation failed: {}", .{e});
             bp.jit.execute(bp);
         }
 
