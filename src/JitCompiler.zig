@@ -1,10 +1,9 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const BytePusher = @import("BytePusher.zig");
 
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
-const PROT = std.os.PROT;
-const MAP = std.os.MAP;
 const log = std.log.scoped(.Jit);
 
 const JitFn = *const fn (*[BytePusher.mem_size]u8, u32) callconv(.SysV) u32;
@@ -38,7 +37,13 @@ pub fn deinit(self: *Self) void {
         if (maybe_block == null) continue;
 
         log.debug("block of {} instructions found at PC: 0x{X:0>8}", .{ maybe_block.?.cycle_count, i });
-        std.os.munmap(maybe_block.?.mem);
+
+        if (builtin.os.tag != .windows) {
+            std.os.munmap(maybe_block.?.mem);
+        } else {
+            const MEM_RELEASE = std.os.windows.MEM_RELEASE;
+            std.os.windows.VirtualFree(maybe_block.?.mem.ptr, 0, MEM_RELEASE);
+        }
     }
 
     self.allocator.free(self.table);
@@ -120,7 +125,19 @@ fn compile(self: *Self, bp: *const BytePusher) !Block {
     // zig fmt: on
     log.info("compiled a block of {} instructions", .{instr_count});
 
-    var mem = try std.os.mmap(null, self.code.items.len, PROT.WRITE | PROT.EXEC, MAP.ANONYMOUS | MAP.PRIVATE, -1, 0);
+    const mem = if (builtin.os.tag != .windows) blk: {
+        const PROT = std.os.PROT;
+        const MAP = std.os.MAP;
+
+        break :blk try std.os.mmap(null, self.code.items.len, PROT.WRITE | PROT.EXEC, MAP.ANONYMOUS | MAP.PRIVATE, -1, 0);
+    } else blk: {
+        const MEM_COMMIT = std.os.windows.MEM_COMMIT;
+        const PAGE_EXECUTE_READWRITE = std.os.windows.PAGE_EXECUTE_READWRITE;
+        const alignment = std.mem.page_size;
+
+        const ptr = try std.os.windows.VirtualAlloc(null, self.code.items.len, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+        break :blk @ptrCast([*]align(alignment) u8, @alignCast(alignment, ptr))[0..self.code.items.len];
+    };
     std.mem.copy(u8, mem, self.code.items);
 
     return .{
