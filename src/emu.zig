@@ -27,8 +27,7 @@ pub const jit = struct {
 
         var cycles: u32 = 0;
         while (cycles < cycles_per_frame) {
-            cycles += bp.jit.compile(bp) catch |e| std.debug.panic("JIT compilation failed: {}", .{e});
-            bp.jit.execute(bp);
+            cycles += bp.jit.execute(bp);
         }
 
         bp.updateFrameBuffer(fb.get(.Guest));

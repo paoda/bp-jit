@@ -5,32 +5,47 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const PROT = std.os.PROT;
 const MAP = std.os.MAP;
+const log = std.log.scoped(.Jit);
 
+const JitFn = *const fn (*[BytePusher.mem_size]u8, u32) callconv(.SysV) u32;
 const Self = @This();
-const log = std.log.scoped(.JIT);
-
-const code_buf_len = std.mem.page_size * 64; // 256KiB
 
 code: ArrayList(u8),
-exec_mem: []align(std.mem.page_size) u8,
+
+table: []?Block,
 allocator: Allocator,
 
+const Block = struct {
+    mem: []align(std.mem.page_size) u8,
+    cycle_count: u32,
+};
+
 pub fn init(allocator: Allocator) !Self {
+    const table = try allocator.alloc(?Block, BytePusher.mem_size);
+    std.mem.set(?Block, table, null);
+
     return .{
-        // TODO: Windows?
-        .exec_mem = try std.os.mmap(null, code_buf_len, PROT.WRITE | PROT.EXEC, MAP.ANONYMOUS | MAP.PRIVATE, -1, 0),
+        .table = table,
+        .code = try ArrayList(u8).initCapacity(allocator, 64), // smallest block is 40 instructions
         .allocator = allocator,
-        .code = try ArrayList(u8).initCapacity(allocator, code_buf_len),
     };
 }
 
 pub fn deinit(self: *Self) void {
     self.code.deinit();
-    std.os.munmap(self.exec_mem);
+
+    for (self.table) |maybe_block, i| {
+        if (maybe_block == null) continue;
+
+        log.debug("block of {} instructions found at PC: 0x{X:0>8}", .{ maybe_block.?.cycle_count, i });
+        std.os.munmap(maybe_block.?.mem);
+    }
+
+    self.allocator.free(self.table);
     self.* = undefined;
 }
 
-pub fn compile(self: *Self, bp: *const BytePusher) !u32 {
+fn compile(self: *Self, bp: *const BytePusher) !Block {
     // Translate BytePusher Instructions to x86 assembly
     var instr_count: u32 = 0;
     var current_pc = bp.pc;
@@ -110,33 +125,27 @@ pub fn compile(self: *Self, bp: *const BytePusher) !u32 {
         0xC3                                // ret
     });
     // zig fmt: on
+    log.info("compiled a block of {} instructions", .{instr_count});
 
-    // log.info("block of {} instructions compiled", .{instr_count});
-    // log.info("buf len: {}", .{self.code.items.len});
-    std.mem.copy(u8, self.exec_mem, self.code.items);
+    var mem = try std.os.mmap(null, self.code.items.len, PROT.WRITE | PROT.EXEC, MAP.ANONYMOUS | MAP.PRIVATE, -1, 0);
+    std.mem.copy(u8, mem, self.code.items);
 
-    return instr_count;
+    return .{
+        .mem = mem,
+        .cycle_count = instr_count,
+    };
 }
 
-pub fn execute(self: *Self, bp: *BytePusher) void {
-    const mem_size = BytePusher.mem_size;
+pub fn execute(self: *Self, bp: *BytePusher) u32 {
+    const pc = bp.pc;
 
-    const fn_ptr = @ptrCast(*const fn (*[mem_size]u8, u32) callconv(.SysV) u32, self.exec_mem);
-    bp.pc = @intCast(u24, fn_ptr(&bp.memory[0], bp.pc));
-}
-
-/// Code Block
-const Block = struct {
-    code: ArrayList(u8),
-
-    start_addr: u24,
-    len: usize = 0,
-    dirty: bool = false,
-
-    pub fn init(allocator: Allocator, start_addr: u24) !Self {
-        return .{
-            .code = ArrayList(u8).init(allocator),
-            .start_addr = start_addr,
-        };
+    if (self.table[pc] == null) {
+        log.warn("cache miss. recompiling...", .{});
+        self.table[pc] = self.compile(bp) catch |e| std.debug.panic("failed to compile block: {}", .{e});
     }
-};
+
+    const fn_ptr = @ptrCast(JitFn, self.table[pc].?.mem);
+    bp.pc = @intCast(u24, fn_ptr(bp.memory, pc));
+
+    return self.table[pc].?.cycle_count;
+}
