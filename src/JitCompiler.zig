@@ -11,17 +11,18 @@ const Self = @This();
 
 code: ArrayList(u8),
 
-table: []?Block,
+table: []Block,
 allocator: Allocator,
 
 const Block = struct {
     mem: []align(std.mem.page_size) u8,
-    cycle_count: u32,
+    cycle_count: u32 = 0,
+    vacant: bool = true,
 };
 
 pub fn init(allocator: Allocator) !Self {
-    const table = try allocator.alloc(?Block, BytePusher.mem_size);
-    std.mem.set(?Block, table, null);
+    const table = try allocator.alloc(Block, BytePusher.mem_size);
+    std.mem.set(Block, table, .{ .mem = undefined });
 
     return .{
         .table = table,
@@ -33,16 +34,16 @@ pub fn init(allocator: Allocator) !Self {
 pub fn deinit(self: *Self) void {
     self.code.deinit();
 
-    for (self.table) |maybe_block, i| {
-        if (maybe_block == null) continue;
+    for (self.table) |block, i| {
+        if (block.vacant) continue;
 
-        log.debug("block of {} instructions found at PC: 0x{X:0>8}", .{ maybe_block.?.cycle_count, i });
+        log.debug("block of {} instructions found at PC: 0x{X:0>8}", .{ block.cycle_count, i });
 
         if (builtin.os.tag != .windows) {
-            std.os.munmap(maybe_block.?.mem);
+            std.os.munmap(block.mem);
         } else {
             const MEM_RELEASE = std.os.windows.MEM_RELEASE;
-            std.os.windows.VirtualFree(maybe_block.?.mem.ptr, 0, MEM_RELEASE);
+            std.os.windows.VirtualFree(block.mem.ptr, 0, MEM_RELEASE);
         }
     }
 
@@ -143,19 +144,20 @@ fn compile(self: *Self, bp: *const BytePusher) !Block {
     return .{
         .mem = mem,
         .cycle_count = instr_count,
+        .vacant = false,
     };
 }
 
 pub fn execute(self: *Self, bp: *BytePusher) u32 {
     const pc = bp.pc;
 
-    if (self.table[pc] == null) {
+    if (self.table[pc].vacant) {
         log.warn("cache miss. recompiling...", .{});
         self.table[pc] = self.compile(bp) catch |e| std.debug.panic("failed to compile block: {}", .{e});
     }
 
-    const fn_ptr = @ptrCast(JitFn, self.table[pc].?.mem);
+    const fn_ptr = @ptrCast(JitFn, self.table[pc].mem);
     bp.pc = @intCast(u24, fn_ptr(bp.memory, pc));
 
-    return self.table[pc].?.cycle_count;
+    return self.table[pc].cycle_count;
 }
