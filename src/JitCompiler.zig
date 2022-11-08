@@ -71,27 +71,23 @@ fn compile(self: *Self, bp: *const BytePusher) !Block {
 
         // 1. load memory[PC + 0] (this is the src addr)
         // 2. shift src addr to the right twice (24-bit integer)
-        // 3. mask the 24 bits
         // zig fmt: off
         try writer.writeAll(&.{
-            0x0F, 0x38, 0xF0, 0x14, 0x37,       // movbe edx, DWORD PTR [rdi + rsi]
-            0xC1, 0xEA, 0x08,                   // shr edx, 8
-            // 0x81, 0xE2, 0xFF, 0xFF, 0xFF, 0x00  // and edx, 0x00FF_FFFF
+            0x0F, 0x38, 0xF0, 0x14, 0x37,   // movbe edx, DWORD PTR [rdi + rsi]
+            0xC1, 0xEA, 0x08,               // shr edx, 8
         });
         // zig fmt: on
 
-        // 4. load memory[PC + 3] (this is the dest addr)
-        // 5. shift dest addr to the right twice (24-bit integer)
-        // 6. mask the 24 bits
+        // 3. load memory[PC + 3] (this is the dest addr)
+        // 4. shift dest addr to the right twice (24-bit integer)
         // zig fmt: off
         try writer.writeAll(&.{
             0x0F, 0x38, 0xF0, 0x4C, 0x37, 0x03, // movbe ecx, DWORD PTR[rdi + rsi + 3]
             0xC1, 0xE9, 0x08,                   // shr ecx, 8
-            // 0x81, 0xE1, 0xFF, 0xFF, 0xFF, 0x0   // and ecx, 0x00FF_FFFF
         });
         // zig fmt: on
 
-        // load value at memory[src_addr] into memory[dest_addr]
+        // 5. load value at memory[src_addr] into memory[dest_addr]
         // zig fmt: off
         try writer.writeAll(&.{
             0x44, 0x8A, 0x04, 0x17, // mov r8b, BYTE PTR [rdi + rdx]
@@ -104,17 +100,14 @@ fn compile(self: *Self, bp: *const BytePusher) !Block {
         const next_pc = bp.read(u24, current_pc + 6);
         if (next_pc != current_pc + 9) break;
 
-        // add 9 to PC to prepare for next sequential instruction
+        // 6. add 9 to PC to prepare for next sequential instruction
         try writer.writeAll(&.{ 0x83, 0xC6, 0x09 }); // add esi, 9
 
         // update our current pc and continue the loop
         current_pc = next_pc;
     }
 
-    // // mov eax, DWORD PTR [rdi + rsi + 6] ; load memory[PC + 6] into EAX so it can be returned to the caller
-    // try writer.writeAll(&.{ 0x8B, 0x44, 0x37, 0x06 });
-
-    // load memory[PC +6] into EAX so Zig can assign it to the BytePusher struct's pc variable
+    // load memory[PC +6] into EAX as the return value
     // zig fmt: off
     try writer.writeAll(&.{
         0x0F, 0x38, 0xF0, 0x44, 0x37, 0x06, // movbe eax, DWORD PTR [rdi + rsi + 6] 
