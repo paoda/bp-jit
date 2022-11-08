@@ -14,6 +14,7 @@ jit: JitCompiler,
 
 pub fn init(allocator: Allocator, path: []const u8) !Self {
     const memory = try allocator.create([mem_size]u8);
+    std.mem.set(u8, memory, 0);
 
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
