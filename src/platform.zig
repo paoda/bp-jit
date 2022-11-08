@@ -93,7 +93,15 @@ pub const Gui = struct {
             while (SDL.SDL_PollEvent(&event) != 0) {
                 switch (event.type) {
                     SDL.SDL_QUIT => break :emu_loop,
-                    else => {}, // TODO: Add Input
+                    SDL.SDL_KEYDOWN => {
+                        const key_mem = @ptrCast([*]u16, @alignCast(@alignOf(u16), bp.memory));
+                        key_mem[0] = key_mem[0] | emu.key(event.key.keysym.sym);
+                    },
+                    SDL.SDL_KEYUP => {
+                        const key_mem = @ptrCast([*]u16, @alignCast(@alignOf(u16), bp.memory));
+                        key_mem[0] = key_mem[0] & ~emu.key(event.key.keysym.sym);
+                    },
+                    else => {},
                 }
             }
 
