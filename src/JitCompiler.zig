@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const BytePusher = @import("BytePusher.zig");
 
 const Allocator = std.mem.Allocator;
+const HashMap = std.HashMap(u24, Block, Context, 80);
 const ArrayList = std.ArrayList;
 const log = std.log.scoped(.Jit);
 
@@ -10,8 +11,8 @@ const JitFn = *const fn (*[BytePusher.mem_size]u8, u32) callconv(.SysV) u32;
 const Self = @This();
 
 code: ArrayList(u8),
+map: HashMap,
 
-table: []Block,
 allocator: Allocator,
 
 const Block = struct {
@@ -21,11 +22,8 @@ const Block = struct {
 };
 
 pub fn init(allocator: Allocator) !Self {
-    const table = try allocator.alloc(Block, BytePusher.mem_size);
-    std.mem.set(Block, table, .{ .mem = undefined });
-
     return .{
-        .table = table,
+        .map = HashMap.initContext(allocator, .{}),
         .code = try ArrayList(u8).initCapacity(allocator, 64), // smallest block is 40 instructions
         .allocator = allocator,
     };
@@ -34,10 +32,12 @@ pub fn init(allocator: Allocator) !Self {
 pub fn deinit(self: *Self) void {
     self.code.deinit();
 
-    for (self.table) |block, i| {
+    var it = self.map.iterator();
+    while (it.next()) |entry| {
+        const block = entry.value_ptr;
         if (block.vacant) continue;
 
-        log.debug("block of {} instructions found at PC: 0x{X:0>8}", .{ block.cycle_count, i });
+        log.debug("block of {} instructions found at PC: 0x{X:0>8}", .{ block.cycle_count, entry.key_ptr.* });
 
         if (builtin.os.tag != .windows) {
             std.os.munmap(block.mem);
@@ -47,7 +47,7 @@ pub fn deinit(self: *Self) void {
         }
     }
 
-    self.allocator.free(self.table);
+    self.map.deinit();
     self.* = undefined;
 }
 
@@ -151,13 +151,33 @@ fn compile(self: *Self, bp: *const BytePusher) !Block {
 pub fn execute(self: *Self, bp: *BytePusher) u32 {
     const pc = bp.pc;
 
-    if (self.table[pc].vacant) {
+    var entry = self.map.getOrPut(pc) catch |e| panic("failed to access HashMap: {}", .{e});
+    if (!entry.found_existing) {
         log.warn("cache miss. recompiling...", .{});
-        self.table[pc] = self.compile(bp) catch |e| std.debug.panic("failed to compile block: {}", .{e});
+        entry.value_ptr.* = self.compile(bp) catch |e| panic("failed to compile block: {}", .{e});
     }
+    const block = entry.value_ptr;
 
-    const fn_ptr = @ptrCast(JitFn, self.table[pc].mem);
+    const fn_ptr = @ptrCast(JitFn, block.mem);
     bp.pc = @intCast(u24, fn_ptr(bp.memory, pc));
 
-    return self.table[pc].cycle_count;
+    return block.cycle_count;
 }
+
+fn panic(comptime format: []const u8, args: anytype) noreturn {
+    @setCold(true);
+    std.debug.panic(format, args);
+}
+
+const Context = struct {
+    pub fn hash(self: @This(), value: u24) u64 {
+        _ = self;
+        return value;
+    }
+
+    pub fn eql(self: @This(), left: u24, right: u24) bool {
+        _ = self;
+
+        return left == right;
+    }
+};
