@@ -75,10 +75,11 @@ const color_lut: [256]u32 = blk: {
 pub fn updateFrameBuffer(self: *const Self, buf: []u8) void {
     const page = @as(u24, self.read(u8, 0x000005)) << 16;
 
+    var frame_buf = @ptrCast([*]u32, @alignCast(@alignOf(u32), buf));
+
     var i: u16 = 0;
     while (i < std.math.maxInt(u16)) : (i += 1) {
-        const rgba8888 = color_lut[self.read(u8, page | i)];
-        std.mem.writeIntSliceNative(u32, buf[@as(u32, i) * @sizeOf(u32) ..][0..@sizeOf(u32)], rgba8888);
+        frame_buf[i] = color_lut[self.memory[page | i]];
     }
 }
 
