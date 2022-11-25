@@ -6,6 +6,7 @@ const emu = @import("emu.zig");
 
 const Allocator = std.mem.Allocator;
 const BytePusher = @import("BytePusher.zig");
+const FpsTracker = @import("util.zig").FpsTracker;
 
 // zig fmt: off
 const vertices: [32]f32 = [_]f32{
@@ -81,14 +82,19 @@ pub const Gui = struct {
         return SDL.SDL_GL_GetProcAddress(proc.ptr);
     }
 
-    pub fn run(self: *Self, bp: *BytePusher) void {
+    pub fn run(self: *Self, bp: *BytePusher) !void {
         const vao_id = generateBuffers()[0];
         _ = generateTexture(self.framebuffer.get(.Host));
 
-        emu_loop: while (true) {
-            emu.jit.runFrame(bp, &self.framebuffer);
-            // emu.interpreter.runFrame(bp, &self.framebuffer);
+        var quit = std.atomic.Atomic(bool).init(false);
+        var tracker = FpsTracker.init();
 
+        const thread = try std.Thread.spawn(.{}, emu.run, .{ bp, &self.framebuffer, &quit, &tracker });
+        defer thread.join();
+
+        var title_buf = std.mem.zeroes([0x100]u8);
+
+        emu_loop: while (true) {
             var event: SDL.SDL_Event = undefined;
             while (SDL.SDL_PollEvent(&event) != 0) {
                 switch (event.type) {
@@ -112,7 +118,12 @@ pub const Gui = struct {
             gl.bindVertexArray(vao_id);
             gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, null);
             SDL.SDL_GL_SwapWindow(self.window);
+
+            const dyn_title = std.fmt.bufPrint(&title_buf, "{s} | Emu: {}fps", .{ title, tracker.value() }) catch unreachable;
+            SDL.SDL_SetWindowTitle(self.window, dyn_title.ptr);
         }
+
+        quit.store(true, .SeqCst);
     }
 };
 

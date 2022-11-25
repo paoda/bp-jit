@@ -1,13 +1,26 @@
 const std = @import("std");
 const SDL = @import("sdl2");
 
+const FpsTracker = @import("util.zig").FpsTracker;
+
 const BytePusher = @import("BytePusher.zig");
 const FrameBuffer = @import("platform.zig").FrameBuffer;
 
 const cycles_per_frame = 0x10000;
 
-pub const interpreter = struct {
-    pub fn runFrame(bp: *BytePusher, fb: *FrameBuffer) void {
+pub fn run(bp: *BytePusher, fb: *FrameBuffer, quit: *std.atomic.Atomic(bool), tracker: *FpsTracker) void {
+    while (!quit.load(.SeqCst)) {
+        // TODO: Time to 60Fps
+
+        jit.runFrame(bp, fb); // 2x faster on my laptop
+        // interp.runFrame(bp, fb);
+
+        tracker.tick();
+    }
+}
+
+const interp = struct {
+    fn runFrame(bp: *BytePusher, fb: *FrameBuffer) void {
         // TODO: Poll Keys, Write to Key Register
         bp.pc = bp.fetch();
 
@@ -21,8 +34,8 @@ pub const interpreter = struct {
     }
 };
 
-pub const jit = struct {
-    pub fn runFrame(bp: *BytePusher, fb: *FrameBuffer) void {
+const jit = struct {
+    fn runFrame(bp: *BytePusher, fb: *FrameBuffer) void {
         // TODO: Poll Keys, Write to Key Register
         bp.pc = bp.fetch();
 

@@ -38,7 +38,7 @@ pub fn main() !void {
             var bp = try BytePusher.init(allocator, path);
             defer bp.deinit();
 
-            gui.run(&bp);
+            try gui.run(&bp);
         },
     }
 }
