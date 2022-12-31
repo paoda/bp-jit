@@ -1,5 +1,6 @@
 const std = @import("std");
 const glfw = @import("lib/mach-glfw/build.zig");
+const zgui = @import("lib/zgui/build.zig");
 
 pub fn build(b: *std.build.Builder) !void {
     // Standard target options allows the person running `zig build` to choose
@@ -24,6 +25,12 @@ pub fn build(b: *std.build.Builder) !void {
     // GLFW Bindings
     exe.addPackage(glfw.pkg);
     try glfw.link(b, exe, .{});
+
+    // Dear ImGui Bindings
+    const zgui_options = zgui.BuildOptionsStep.init(b, .{ .backend = .glfw_opengl3 });
+    const zgui_pkg = zgui.getPkg(&.{zgui_options.getPkg()});
+    exe.addPackage(zgui_pkg);
+    zgui.link(exe, zgui_options);
 
     exe.setBuildMode(mode);
     exe.install();

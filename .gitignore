@@ -3,3 +3,5 @@ zig-cache/
 .vscode/
 
 bin/
+
+imgui.ini

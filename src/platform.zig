@@ -1,6 +1,7 @@
 const std = @import("std");
 const glfw = @import("glfw");
 const gl = @import("gl");
+const zgui = @import("zgui");
 
 const emu = @import("emu.zig");
 
@@ -28,8 +29,8 @@ const indices: [6]u32 = [_]u32{
 };
  // zig fmt: on
 
-const width = 256;
-const height = width;
+const width = 1280;
+const height = 720;
 
 pub const Gui = struct {
     const Self = @This();
@@ -44,11 +45,16 @@ pub const Gui = struct {
     pub fn init(allocator: Allocator) !Self {
         try glfw.init(.{});
 
-        const window = try glfw.Window.create(width * 3, height * 3, title, null, null, .{});
+        const window = try glfw.Window.create(width, height, title, null, null, .{});
         try glfw.makeContextCurrent(window);
+        try glfw.swapInterval(1); // enable vsync
+
         window.setKeyCallback(keyCallback);
 
         try gl.load({}, getProcAddress);
+
+        zgui.init(allocator);
+        zgui.backend.init(window.handle, "#version 330 core");
 
         return .{
             .window = window,
@@ -62,6 +68,10 @@ pub const Gui = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        // Deinit Imgui
+        zgui.backend.deinit();
+        zgui.deinit();
+
         self.framebuffer.deinit();
 
         // TODO: OpenGL Buffer Deallocations
@@ -76,6 +86,7 @@ pub const Gui = struct {
         self.window.setUserPointer(bp); // expose BytePusher to glfw callbacks
 
         const vao_id = generateBuffers()[0];
+        _ = vao_id;
         _ = generateTexture(self.framebuffer.get(.Host));
 
         var quit = std.atomic.Atomic(bool).init(false);
@@ -86,15 +97,31 @@ pub const Gui = struct {
 
         var title_buf: [0x100]u8 = undefined;
 
+        const clear: [4]f32 = .{ 0.45, 0.55, 0.60, 1.00 };
+
         while (!self.window.shouldClose()) {
             try glfw.pollEvents();
 
-            const buf: []const u8 = self.framebuffer.get(.Host);
-            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, buf.ptr);
+            // const buf: []const u8 = self.framebuffer.get(.Host);
+            // gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, BytePusher.width, BytePusher.height, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, buf.ptr);
 
-            gl.useProgram(self.program_id);
-            gl.bindVertexArray(vao_id);
-            gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, null);
+            // gl.useProgram(self.program_id);
+            // gl.bindVertexArray(vao_id);
+            // gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, null);
+
+            zgui.backend.newFrame(width, height);
+
+            // TODO: Render Gui
+
+            zgui.text("Hello World!", .{});
+
+            zgui.backend.render();
+            const size = try self.window.getFramebufferSize();
+            gl.viewport(0, 0, @intCast(c_int, size.width), @intCast(c_int, size.height));
+            gl.clearColor(clear[0] * clear[3], clear[1] * clear[3], clear[2] * clear[3], clear[3]);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            zgui.backend.draw();
+
             try self.window.swapBuffers();
 
             const dyn_title = std.fmt.bufPrintZ(&title_buf, "{s} | Emu: {}fps", .{ title, tracker.value() }) catch unreachable;
@@ -156,7 +183,7 @@ fn generateTexture(buf: []const u8) c_uint {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, buf.ptr);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, BytePusher.width, BytePusher.height, 0, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, buf.ptr);
     // gl.generateMipmap(gl.TEXTURE_2D); // TODO: Remove?
 
     return tex_id;
@@ -193,7 +220,7 @@ fn generateBuffers() [3]c_uint {
 
 pub const FrameBuffer = struct {
     const Self = @This();
-    const buf_size = width * height * @sizeOf(u32);
+    const buf_size = BytePusher.width * BytePusher.height * @sizeOf(u32);
 
     layer: [2]*[buf_size]u8,
     buf: *[buf_size * 2]u8,

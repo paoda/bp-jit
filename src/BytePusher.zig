@@ -6,6 +6,8 @@ const Allocator = std.mem.Allocator;
 const Self = @This();
 const log = std.log.scoped(.BytePusher);
 pub const mem_size = 0x0100_0008; // 16 MiB
+pub const width = 256;
+pub const height = width;
 
 pc: u24,
 memory: *[mem_size]u8,
