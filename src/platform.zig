@@ -85,9 +85,11 @@ pub const Gui = struct {
     pub fn run(self: *Self, bp: *BytePusher) !void {
         self.window.setUserPointer(bp); // expose BytePusher to glfw callbacks
 
-        const vao_id = generateBuffers()[0];
-        _ = vao_id;
-        _ = generateTexture(self.framebuffer.get(.Host));
+        const obj_ids = generateBuffers();
+        const emu_tex_id = generateTexture(self.framebuffer.get(.Host));
+
+        const out_tex_id = generateOutputTexture();
+        const fbo_id = try generateFrameBuffer(out_tex_id);
 
         var quit = std.atomic.Atomic(bool).init(false);
         var tracker = FpsTracker.init();
@@ -102,24 +104,24 @@ pub const Gui = struct {
         while (!self.window.shouldClose()) {
             try glfw.pollEvents();
 
-            // const buf: []const u8 = self.framebuffer.get(.Host);
-            // gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, BytePusher.width, BytePusher.height, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, buf.ptr);
+            {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, fbo_id);
+                defer gl.bindFramebuffer(gl.FRAMEBUFFER, 0);
 
-            // gl.useProgram(self.program_id);
-            // gl.bindVertexArray(vao_id);
-            // gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, null);
+                gl.viewport(0, 0, BytePusher.width, BytePusher.height);
+                self.drawBytePusherTexture(obj_ids, emu_tex_id);
+            }
 
-            zgui.backend.newFrame(width, height);
-
-            // TODO: Render Gui
-
-            zgui.text("Hello World!", .{});
-
-            zgui.backend.render();
+            // Background Color
             const size = try self.window.getFramebufferSize();
             gl.viewport(0, 0, @intCast(c_int, size.width), @intCast(c_int, size.height));
             gl.clearColor(clear[0] * clear[3], clear[1] * clear[3], clear[2] * clear[3], clear[3]);
             gl.clear(gl.COLOR_BUFFER_BIT);
+
+            zgui.backend.newFrame(width, height);
+            self.draw(out_tex_id);
+            zgui.backend.render();
+
             zgui.backend.draw();
 
             try self.window.swapBuffers();
@@ -129,6 +131,50 @@ pub const Gui = struct {
         }
 
         quit.store(true, .SeqCst);
+    }
+
+    const ObjectIds = struct { c_uint, c_uint, c_uint };
+
+    fn drawBytePusherTexture(self: *Self, obj_ids: ObjectIds, tex_id: c_uint) void {
+        const buf: []const u8 = self.framebuffer.get(.Host);
+
+        gl.bindTexture(gl.TEXTURE_2D, tex_id);
+        defer gl.bindTexture(gl.TEXTURE_2D, 0);
+
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, BytePusher.width, BytePusher.height, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, buf.ptr);
+
+        // Bind VAO, EBO
+        const vao_id = obj_ids[0];
+        gl.bindVertexArray(vao_id);
+        defer gl.bindVertexArray(0);
+
+        const ebo_id = obj_ids[2];
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo_id);
+        defer gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, 0);
+
+        // Use compiled frag + vertex shader
+        gl.useProgram(self.program_id);
+        defer gl.useProgram(0);
+
+        gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, null);
+    }
+
+    fn draw(self: *Self, tex_id: c_uint) void {
+        _ = self;
+
+        {
+            _ = zgui.begin("BytePusher Screen", .{ .flags = .{ .no_resize = true } });
+            defer zgui.end();
+
+            const args = .{
+                .w = BytePusher.width,
+                .h = BytePusher.height,
+                .uv0 = .{ 0.0, 1.0 },
+                .uv1 = .{ 1.0, 0.0 },
+            };
+
+            zgui.image(@intToPtr(*anyopaque, tex_id), args);
+        }
     }
 
     fn keyCallback(window: Window, key: Key, scancode: i32, action: Action, mods: Mods) void {
@@ -175,21 +221,55 @@ fn compileShaders() c_uint {
     return program;
 }
 
+fn generateFrameBuffer(tex_id: c_uint) !c_uint {
+    var fbo_id: c_uint = undefined;
+    gl.genFramebuffers(1, &fbo_id);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo_id);
+    defer gl.bindFramebuffer(gl.FRAMEBUFFER, 0);
+
+    gl.framebufferTexture(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, tex_id, 0);
+
+    const draw_buffers: [1]c_uint = .{gl.COLOR_ATTACHMENT0};
+    gl.drawBuffers(1, &draw_buffers);
+
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE)
+        return error.FrameBufferInitFailed;
+
+    return fbo_id;
+}
+
+fn generateOutputTexture() c_uint {
+    var tex_id: c_uint = undefined;
+    gl.genTextures(1, &tex_id);
+
+    gl.bindTexture(gl.TEXTURE_2D, tex_id);
+    defer gl.bindTexture(gl.TEXTURE_2D, 0);
+
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, BytePusher.width, BytePusher.height, 0, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, null);
+
+    return tex_id;
+}
+
 fn generateTexture(buf: []const u8) c_uint {
     var tex_id: c_uint = undefined;
     gl.genTextures(1, &tex_id);
+
     gl.bindTexture(gl.TEXTURE_2D, tex_id);
+    defer gl.bindTexture(gl.TEXTURE_2D, 0);
 
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, BytePusher.width, BytePusher.height, 0, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, buf.ptr);
-    // gl.generateMipmap(gl.TEXTURE_2D); // TODO: Remove?
 
     return tex_id;
 }
 
-fn generateBuffers() [3]c_uint {
+fn generateBuffers() struct { c_uint, c_uint, c_uint } {
     var vao_id: c_uint = undefined;
     var vbo_id: c_uint = undefined;
     var ebo_id: c_uint = undefined;
@@ -198,11 +278,16 @@ fn generateBuffers() [3]c_uint {
     gl.genBuffers(1, &ebo_id);
 
     gl.bindVertexArray(vao_id);
+    defer gl.bindVertexArray(0);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, vbo_id);
+    defer gl.bindBuffer(gl.ARRAY_BUFFER, 0);
+
     gl.bufferData(gl.ARRAY_BUFFER, @sizeOf(@TypeOf(vertices)), &vertices, gl.STATIC_DRAW);
 
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo_id);
+    defer gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, 0);
+
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, @sizeOf(@TypeOf(indices)), &indices, gl.STATIC_DRAW);
 
     // Position
