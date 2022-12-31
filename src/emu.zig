@@ -1,5 +1,7 @@
 const std = @import("std");
-const SDL = @import("sdl2");
+const glfw = @import("glfw");
+
+const Key = glfw.Key;
 
 const FpsTracker = @import("util.zig").FpsTracker;
 
@@ -49,27 +51,27 @@ const jit = struct {
     }
 };
 
-pub fn key(key_code: SDL.SDL_Keycode) u16 {
-    return @byteSwap(switch (key_code) {
-        SDL.SDLK_1 => 1 << 0x1,
-        SDL.SDLK_2 => 1 << 0x2,
-        SDL.SDLK_3 => 1 << 0x3,
-        SDL.SDLK_4 => 1 << 0xC,
+pub fn key(code: Key) u16 {
+    return @byteSwap(switch (code) {
+        .one => 1 << 0x1,
+        .two => 1 << 0x2,
+        .three => 1 << 0x3,
+        .four => 1 << 0xC,
 
-        SDL.SDLK_q => 1 << 0x4,
-        SDL.SDLK_w => 1 << 0x5,
-        SDL.SDLK_e => 1 << 0x6,
-        SDL.SDLK_r => 1 << 0xD,
+        .q => 1 << 0x4,
+        .w => 1 << 0x5,
+        .e => 1 << 0x6,
+        .r => 1 << 0xD,
 
-        SDL.SDLK_a => 1 << 0x7,
-        SDL.SDLK_s => 1 << 0x8,
-        SDL.SDLK_d => 1 << 0x9,
-        SDL.SDLK_f => 1 << 0xE,
+        .a => 1 << 0x7,
+        .s => 1 << 0x8,
+        .d => 1 << 0x9,
+        .f => 1 << 0xE,
 
-        SDL.SDLK_z => 1 << 0xA,
-        SDL.SDLK_x => 1 << 0x0,
-        SDL.SDLK_c => 1 << 0xB,
-        SDL.SDLK_v => 1 << 0xF,
+        .z => 1 << 0xA,
+        .x => 1 << 0x0,
+        .c => 1 << 0xB,
+        .v => 1 << 0xF,
         else => @as(u16, 0),
     });
 }

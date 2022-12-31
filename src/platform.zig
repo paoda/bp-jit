@@ -1,8 +1,13 @@
 const std = @import("std");
-const SDL = @import("sdl2");
+const glfw = @import("glfw");
 const gl = @import("gl");
 
 const emu = @import("emu.zig");
+
+const Window = glfw.Window;
+const Key = glfw.Key;
+const Mods = glfw.Mods;
+const Action = glfw.Action;
 
 const Allocator = std.mem.Allocator;
 const BytePusher = @import("BytePusher.zig");
@@ -28,42 +33,32 @@ const height = width;
 
 pub const Gui = struct {
     const Self = @This();
-    const SDL_GLContext = *anyopaque;
     const log = std.log.scoped(.Gui);
-    const title: []const u8 = "BytePusher JIT";
+    const title = "BytePusher JIT";
 
-    window: *SDL.SDL_Window,
-    ctx: SDL_GLContext,
+    window: Window,
     framebuffer: FrameBuffer,
 
     program_id: c_uint,
 
     pub fn init(allocator: Allocator) !Self {
-        if (SDL.SDL_Init(SDL.SDL_INIT_VIDEO | SDL.SDL_INIT_EVENTS | SDL.SDL_INIT_AUDIO) < 0) panic();
-        if (SDL.SDL_GL_SetAttribute(SDL.SDL_GL_CONTEXT_PROFILE_MASK, SDL.SDL_GL_CONTEXT_PROFILE_CORE) < 0) panic();
-        if (SDL.SDL_GL_SetAttribute(SDL.SDL_GL_CONTEXT_MAJOR_VERSION, 3) < 0) panic();
-        if (SDL.SDL_GL_SetAttribute(SDL.SDL_GL_CONTEXT_MAJOR_VERSION, 3) < 0) panic();
+        try glfw.init(.{});
 
-        const window = SDL.SDL_CreateWindow(
-            title.ptr,
-            SDL.SDL_WINDOWPOS_CENTERED,
-            SDL.SDL_WINDOWPOS_CENTERED,
-            width * 3,
-            height * 3,
-            SDL.SDL_WINDOW_OPENGL | SDL.SDL_WINDOW_SHOWN,
-        ) orelse panic();
+        const window = try glfw.Window.create(width * 3, height * 3, title, null, null, .{});
+        try glfw.makeContextCurrent(window);
+        window.setKeyCallback(keyCallback);
 
-        const ctx = SDL.SDL_GL_CreateContext(window) orelse panic();
-        if (SDL.SDL_GL_MakeCurrent(window, ctx) < 0) panic();
+        try gl.load({}, getProcAddress);
 
-        gl.load(ctx, Self.procAddress) catch @panic("gl.load failed");
-        if (SDL.SDL_GL_SetSwapInterval(1) < 0) panic();
+        return .{
+            .window = window,
+            .framebuffer = try FrameBuffer.init(allocator),
+            .program_id = compileShaders(),
+        };
+    }
 
-        const program_id = compileShaders();
-
-        const framebuffer = try FrameBuffer.init(allocator);
-
-        return .{ .window = window, .ctx = ctx, .framebuffer = framebuffer, .program_id = program_id };
+    fn getProcAddress(_: void, proc_name: [:0]const u8) ?*const anyopaque {
+        return glfw.getProcAddress(proc_name);
     }
 
     pub fn deinit(self: *Self) void {
@@ -71,18 +66,15 @@ pub const Gui = struct {
 
         // TODO: OpenGL Buffer Deallocations
         gl.deleteProgram(self.program_id);
-        SDL.SDL_GL_DeleteContext(self.ctx);
-        SDL.SDL_DestroyWindow(self.window);
-        SDL.SDL_Quit();
+
+        self.window.destroy();
+        glfw.terminate();
         self.* = undefined;
     }
 
-    fn procAddress(ctx: SDL.SDL_GLContext, proc: [:0]const u8) ?*anyopaque {
-        _ = ctx;
-        return SDL.SDL_GL_GetProcAddress(proc.ptr);
-    }
-
     pub fn run(self: *Self, bp: *BytePusher) !void {
+        self.window.setUserPointer(bp); // expose BytePusher to glfw callbacks
+
         const vao_id = generateBuffers()[0];
         _ = generateTexture(self.framebuffer.get(.Host));
 
@@ -92,24 +84,10 @@ pub const Gui = struct {
         const thread = try std.Thread.spawn(.{}, emu.run, .{ bp, &self.framebuffer, &quit, &tracker });
         defer thread.join();
 
-        var title_buf = std.mem.zeroes([0x100]u8);
+        var title_buf: [0x100]u8 = undefined;
 
-        emu_loop: while (true) {
-            var event: SDL.SDL_Event = undefined;
-            while (SDL.SDL_PollEvent(&event) != 0) {
-                switch (event.type) {
-                    SDL.SDL_QUIT => break :emu_loop,
-                    SDL.SDL_KEYDOWN => {
-                        const key_mem = @ptrCast([*]u16, @alignCast(@alignOf(u16), bp.memory));
-                        key_mem[0] = key_mem[0] | emu.key(event.key.keysym.sym);
-                    },
-                    SDL.SDL_KEYUP => {
-                        const key_mem = @ptrCast([*]u16, @alignCast(@alignOf(u16), bp.memory));
-                        key_mem[0] = key_mem[0] & ~emu.key(event.key.keysym.sym);
-                    },
-                    else => {},
-                }
-            }
+        while (!self.window.shouldClose()) {
+            try glfw.pollEvents();
 
             const buf: []const u8 = self.framebuffer.get(.Host);
             gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, buf.ptr);
@@ -117,20 +95,33 @@ pub const Gui = struct {
             gl.useProgram(self.program_id);
             gl.bindVertexArray(vao_id);
             gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, null);
-            SDL.SDL_GL_SwapWindow(self.window);
+            try self.window.swapBuffers();
 
-            const dyn_title = std.fmt.bufPrint(&title_buf, "{s} | Emu: {}fps", .{ title, tracker.value() }) catch unreachable;
-            SDL.SDL_SetWindowTitle(self.window, dyn_title.ptr);
+            const dyn_title = std.fmt.bufPrintZ(&title_buf, "{s} | Emu: {}fps", .{ title, tracker.value() }) catch unreachable;
+            try self.window.setTitle(dyn_title);
         }
 
         quit.store(true, .SeqCst);
     }
-};
 
-fn panic() noreturn {
-    const str = @as(?[*:0]const u8, SDL.SDL_GetError()) orelse "unknown error";
-    @panic(std.mem.sliceTo(str, 0));
-}
+    fn keyCallback(window: Window, key: Key, scancode: i32, action: Action, mods: Mods) void {
+        _ = scancode;
+        _ = mods;
+
+        const bp = window.getUserPointer(BytePusher) orelse {
+            log.err("glfw key callback does not have access to BytePusher state", .{});
+            return;
+        };
+
+        const key_ptr = @ptrCast(*u16, @alignCast(@alignOf(u16), bp.memory));
+
+        switch (action) {
+            .press => key_ptr.* |= emu.key(key),
+            .release => key_ptr.* &= ~emu.key(key),
+            else => {},
+        }
+    }
+};
 
 fn compileShaders() c_uint {
     // TODO: Panic on Shader Compiler Failure + Error Message
