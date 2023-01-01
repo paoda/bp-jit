@@ -6,4 +6,4 @@
 	url = https://github.com/hexops/mach-glfw
 [submodule "lib/zgui"]
 	path = lib/zgui
-	url = ssh://git@musuka.dev:2222/paoda/zgui.git
+	url = https://git.musuka.dev/paoda/zgui
