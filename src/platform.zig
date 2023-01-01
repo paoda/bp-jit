@@ -120,8 +120,6 @@ pub const Gui = struct {
 
             zgui.backend.newFrame(width, height);
             self.draw(out_tex_id);
-            zgui.backend.render();
-
             zgui.backend.draw();
 
             try self.window.swapBuffers();
