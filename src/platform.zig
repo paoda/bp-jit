@@ -43,11 +43,11 @@ pub const Gui = struct {
     program_id: c_uint,
 
     pub fn init(allocator: Allocator) !Self {
-        try glfw.init(.{});
+        if (!glfw.init(.{})) exitln("failed to init glfw: {?s}", .{glfw.getErrorString()});
 
-        const window = try glfw.Window.create(width, height, title, null, null, .{});
-        try glfw.makeContextCurrent(window);
-        try glfw.swapInterval(1); // enable vsync
+        const window = glfw.Window.create(width, height, title, null, null, .{}) orelse exitln("failed to init glfw window: {?s}", .{glfw.getErrorString()});
+        glfw.makeContextCurrent(window);
+        glfw.swapInterval(1); // enable vsync
 
         window.setKeyCallback(keyCallback);
 
@@ -102,7 +102,7 @@ pub const Gui = struct {
         const clear: [4]f32 = .{ 0.45, 0.55, 0.60, 1.00 };
 
         while (!self.window.shouldClose()) {
-            try glfw.pollEvents();
+            glfw.pollEvents();
 
             {
                 gl.bindFramebuffer(gl.FRAMEBUFFER, fbo_id);
@@ -113,7 +113,7 @@ pub const Gui = struct {
             }
 
             // Background Color
-            const size = try self.window.getFramebufferSize();
+            const size = self.window.getFramebufferSize();
             gl.viewport(0, 0, @intCast(c_int, size.width), @intCast(c_int, size.height));
             gl.clearColor(clear[0] * clear[3], clear[1] * clear[3], clear[2] * clear[3], clear[3]);
             gl.clear(gl.COLOR_BUFFER_BIT);
@@ -122,10 +122,10 @@ pub const Gui = struct {
             self.draw(out_tex_id);
             zgui.backend.draw();
 
-            try self.window.swapBuffers();
+            self.window.swapBuffers();
 
             const dyn_title = std.fmt.bufPrintZ(&title_buf, "{s} | Emu: {}fps", .{ title, tracker.value() }) catch unreachable;
-            try self.window.setTitle(dyn_title);
+            self.window.setTitle(dyn_title);
         }
 
         quit.store(true, .SeqCst);
@@ -338,3 +338,8 @@ pub const FrameBuffer = struct {
         return self.layer[if (dst == .Guest) self.current else ~self.current];
     }
 };
+
+fn exitln(comptime format: []const u8, args: anytype) noreturn {
+    std.log.err(format, args);
+    std.process.exit(1);
+}

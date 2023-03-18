@@ -61,7 +61,7 @@ fn write(self: *Self, comptime T: type, addr: u24, value: T) void {
 const color_lut: [256]u32 = blk: {
     var lut: [256]u32 = undefined;
 
-    for (lut) |*color, i| {
+    for (&lut, 0..) |*color, i| {
         if (i > 216) {
             color.* = 0x0000_00FF;
             continue;
