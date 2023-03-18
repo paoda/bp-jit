@@ -80,11 +80,11 @@ const color_lut: [256]u32 = blk: {
 pub fn updateFrameBuffer(self: *const Self, buf: []u8) void {
     const page = @as(u24, self.read(u8, 0x000005)) << 16;
 
-    var frame_buf = @ptrCast([*]u32, @alignCast(@alignOf(u32), buf));
+    // var frame_buf = @ptrCast([]u32, buf); won't work b/c of compiler TODO
+    var frame_buf = @ptrCast([*]u32, @alignCast(@alignOf(u32), buf))[0 .. buf.len / @sizeOf(u32)];
 
-    var i: u16 = 0;
-    while (i < std.math.maxInt(u16)) : (i += 1) {
-        frame_buf[i] = color_lut[self.memory[page | i]];
+    for (frame_buf, 0..) |*ptr, i| {
+        ptr.* = color_lut[self.memory[page | i]];
     }
 }
 

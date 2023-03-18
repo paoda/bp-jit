@@ -26,10 +26,8 @@ const interp = struct {
         // TODO: Poll Keys, Write to Key Register
         bp.pc = bp.fetch();
 
-        var cycles: u32 = 0;
-        while (cycles < cycles_per_frame) : (cycles += 1) {
+        for (0..cycles_per_frame) |_|
             bp.step();
-        }
 
         bp.updateFrameBuffer(fb.get(.Guest));
         fb.swap();
