@@ -37,9 +37,8 @@ pub fn build(b: *std.Build) !void {
     try glfw.link(b, exe, .{});
 
     // DearImGui Bindings
-    const zgui_pkg = zgui.package(b, .{ .options = .{ .backend = .glfw_opengl3 } });
-    exe.addModule("zgui", zgui_pkg.module);
-    zgui.link(exe, zgui_pkg.options);
+    const zgui_pkg = zgui.package(b, target, optimize, .{ .options = .{ .backend = .glfw_opengl3 } });
+    zgui_pkg.link(exe);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
