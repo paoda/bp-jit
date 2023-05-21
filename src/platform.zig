@@ -315,7 +315,7 @@ pub const FrameBuffer = struct {
 
     pub fn init(allocator: Allocator) !Self {
         const buf = try allocator.create([buf_size * 2]u8);
-        std.mem.set(u8, buf, 0);
+        @memset(buf, 0);
 
         return .{
             .layer = [_]*[buf_size]u8{ buf[0..buf_size], buf[buf_size..(buf_size * 2)] },

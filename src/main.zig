@@ -13,7 +13,7 @@ const params = clap.parseParamsComptime(
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
-    defer std.debug.assert(!gpa.deinit());
+    defer std.debug.assert(gpa.deinit() == .ok);
 
     const stderr = std.io.getStdErr().writer();
 

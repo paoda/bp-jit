@@ -16,7 +16,7 @@ This application is run from the terminal. A typical command might look like: `.
 
 ### Building
 
-Most recently built on Zig [v0.11.0-dev.1987+a2c6ecd6d](https://github.com/ziglang/zig/tree/a2c6ecd6d)
+Most recently built on Zig [v0.11.0-dev.3258+7621e5693](https://github.com/ziglang/zig/tree/7621e5693)
 
 ## Dependencies
 
