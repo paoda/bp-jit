@@ -1,21 +1,20 @@
 const std = @import("std");
 const JitCompiler = @import("JitCompiler.zig");
-
 const Allocator = std.mem.Allocator;
 
-const Self = @This();
-const log = std.log.scoped(.BytePusher);
+const BytePusher = @This();
+const log = std.log.scoped(.byte_pusher);
+
 pub const mem_size = 0x0100_0008; // 16 MiB
 pub const width = 256;
 pub const height = width;
 
-pc: u24,
+pc: u24 = 0x000000,
 memory: *[mem_size]u8,
-allocator: Allocator,
 jit: JitCompiler,
 
-pub fn init(allocator: Allocator, path: []const u8) !Self {
-    const memory = try allocator.create([mem_size]u8);
+pub fn init(allocator: Allocator, path: []const u8) !BytePusher {
+    const memory = try allocator.alignedAlloc(u8, @alignOf(u24), mem_size);
     errdefer allocator.free(memory);
 
     @memset(memory, 0);
@@ -27,33 +26,34 @@ pub fn init(allocator: Allocator, path: []const u8) !Self {
     log.info("rom size: {}B", .{len});
 
     return .{
-        .pc = 0x000000,
-        .allocator = allocator,
-        .memory = memory,
+        .memory = memory[0..mem_size],
         .jit = try JitCompiler.init(allocator),
     };
 }
 
-pub fn deinit(self: *Self) void {
-    self.jit.deinit();
-    self.allocator.destroy(self.memory);
-    self.* = undefined;
+pub fn deinit(self: *BytePusher, allocator: Allocator) void {
+    self.jit.deinit(allocator);
+    allocator.destroy(self.memory);
 }
 
-pub fn fetch(self: *Self) u24 {
+pub fn fetch(self: *BytePusher) u24 {
     return self.read(u24, 0x000002);
 }
 
-pub fn read(self: *const Self, comptime T: type, addr: u24) T {
+pub fn read(self: *const BytePusher, comptime T: type, addr: u24) T {
+    const len = @divExact(@typeInfo(T).Int.bits, 8);
+
     return switch (T) {
-        u24, u16, u8 => std.mem.readIntSliceBig(T, self.memory[addr..][0..@sizeOf(T)]),
+        u24, u16, u8 => std.mem.readInt(T, self.memory[addr..][0..len], .big),
         else => @compileError("bus: unsupported read width"),
     };
 }
 
-fn write(self: *Self, comptime T: type, addr: u24, value: T) void {
+fn write(self: *BytePusher, comptime T: type, addr: u24, value: T) void {
+    const len = @divExact(@typeInfo(T).Int.bits, 8);
+
     switch (T) {
-        u24, u16, u8 => std.mem.writeIntSliceBig(T, self.memory[addr..][0..@sizeOf(T)], value),
+        u24, u16, u8 => std.mem.writeInt(T, self.memory[addr..][0..len], value, .big),
         else => @compileError("bus: unsupported write width"),
     }
 }
@@ -77,18 +77,22 @@ const color_lut: [256]u32 = blk: {
     break :blk lut;
 };
 
-pub fn updateFrameBuffer(self: *const Self, buf: []u8) void {
+pub fn updateFrameBuffer(self: *const BytePusher, buf: []u8) void {
     const page = @as(u24, self.read(u8, 0x000005)) << 16;
 
-    // var frame_buf = @ptrCast([]u32, buf); won't work b/c of compiler TODO
-    var frame_buf = @ptrCast([*]u32, @alignCast(@alignOf(u32), buf))[0 .. buf.len / @sizeOf(u32)];
+    // const frame_buf: []u32 = @ptrCast(buf); TODO: Compiler doesn't support this yet
+
+    const frame_buf = blk: {
+        const ptr: [*]u32 = @ptrCast(@alignCast(buf));
+        break :blk ptr[0 .. buf.len / @sizeOf(u32)];
+    };
 
     for (frame_buf, 0..) |*ptr, i| {
         ptr.* = color_lut[self.memory[page | i]];
     }
 }
 
-pub fn step(self: *Self) void {
+pub fn step(self: *BytePusher) void {
     const src_addr = self.read(u24, self.pc + 0);
     const dst_addr = self.read(u24, self.pc + 3);
 

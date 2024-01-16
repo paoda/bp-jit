@@ -1,9 +1,3 @@
-[submodule "lib/zig-clap"]
-	path = lib/zig-clap
-	url = https://github.com/Hejsil/zig-clap
-[submodule "lib/mach-glfw"]
-	path = lib/mach-glfw
-	url = https://github.com/hexops/mach-glfw
 [submodule "lib/zgui"]
 	path = lib/zgui
 	url = https://git.musuka.dev/paoda/zgui

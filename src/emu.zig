@@ -10,7 +10,7 @@ const FrameBuffer = @import("platform.zig").FrameBuffer;
 
 const cycles_per_frame = 0x10000;
 
-pub fn run(bp: *BytePusher, fb: *FrameBuffer, quit: *std.atomic.Atomic(bool), tracker: *FpsTracker) void {
+pub fn run(bp: *BytePusher, fb: *FrameBuffer, quit: *std.atomic.Value(bool), tracker: *FpsTracker) void {
     while (!quit.load(.SeqCst)) {
         // TODO: Time to 60Fps
 

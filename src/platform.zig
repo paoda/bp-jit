@@ -54,7 +54,7 @@ pub const Gui = struct {
         try gl.load({}, getProcAddress);
 
         zgui.init(allocator);
-        zgui.backend.init(window.handle, "#version 330 core");
+        zgui.backend.initWithGlSlVersion(window.handle, "#version 330 core");
 
         return .{
             .window = window,
@@ -67,7 +67,7 @@ pub const Gui = struct {
         return glfw.getProcAddress(proc_name);
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: *Self, _: Allocator) void {
         // Deinit Imgui
         zgui.backend.deinit();
         zgui.deinit();
@@ -91,7 +91,7 @@ pub const Gui = struct {
         const out_tex_id = generateOutputTexture();
         const fbo_id = try generateFrameBuffer(out_tex_id);
 
-        var quit = std.atomic.Atomic(bool).init(false);
+        var quit = std.atomic.Value(bool).init(false);
         var tracker = FpsTracker.init();
 
         const thread = try std.Thread.spawn(.{}, emu.run, .{ bp, &self.framebuffer, &quit, &tracker });
@@ -114,7 +114,7 @@ pub const Gui = struct {
 
             // Background Color
             const size = self.window.getFramebufferSize();
-            gl.viewport(0, 0, @intCast(c_int, size.width), @intCast(c_int, size.height));
+            gl.viewport(0, 0, @as(c_int, @intCast(size.width)), @as(c_int, @intCast(size.height)));
             gl.clearColor(clear[0] * clear[3], clear[1] * clear[3], clear[2] * clear[3], clear[3]);
             gl.clear(gl.COLOR_BUFFER_BIT);
 
@@ -171,7 +171,7 @@ pub const Gui = struct {
                 .uv1 = .{ 1.0, 0.0 },
             };
 
-            zgui.image(@intToPtr(*anyopaque, tex_id), args);
+            zgui.image(@ptrFromInt(tex_id), args);
         }
     }
 
@@ -184,7 +184,7 @@ pub const Gui = struct {
             return;
         };
 
-        const key_ptr = @ptrCast(*u16, @alignCast(@alignOf(u16), bp.memory));
+        const key_ptr: *u16 = @ptrCast(@alignCast(bp.memory));
 
         switch (action) {
             .press => key_ptr.* |= emu.key(key),
@@ -289,13 +289,13 @@ fn generateBuffers() struct { c_uint, c_uint, c_uint } {
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, @sizeOf(@TypeOf(indices)), &indices, gl.STATIC_DRAW);
 
     // Position
-    gl.vertexAttribPointer(0, 3, gl.FLOAT, gl.FALSE, 8 * @sizeOf(f32), @intToPtr(?*anyopaque, 0)); // lmao
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, gl.FALSE, 8 * @sizeOf(f32), null);
     gl.enableVertexAttribArray(0);
     // Colour
-    gl.vertexAttribPointer(1, 3, gl.FLOAT, gl.FALSE, 8 * @sizeOf(f32), @intToPtr(?*anyopaque, (3 * @sizeOf(f32))));
+    gl.vertexAttribPointer(1, 3, gl.FLOAT, gl.FALSE, 8 * @sizeOf(f32), @as(?*anyopaque, @ptrFromInt((3 * @sizeOf(f32)))));
     gl.enableVertexAttribArray(1);
     // Texture Coord
-    gl.vertexAttribPointer(2, 2, gl.FLOAT, gl.FALSE, 8 * @sizeOf(f32), @intToPtr(?*anyopaque, (6 * @sizeOf(f32))));
+    gl.vertexAttribPointer(2, 2, gl.FLOAT, gl.FALSE, 8 * @sizeOf(f32), @as(?*anyopaque, @ptrFromInt((6 * @sizeOf(f32)))));
     gl.enableVertexAttribArray(2);
 
     return .{ vao_id, vbo_id, ebo_id };

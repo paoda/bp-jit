@@ -1,5 +1,4 @@
 const std = @import("std");
-const glfw = @import("lib/mach-glfw/build.zig");
 const zgui = @import("lib/zgui/build.zig");
 
 // Although this function looks imperative, note that its job is to
@@ -17,6 +16,9 @@ pub fn build(b: *std.Build) !void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    const mach_glfw_dep = b.dependency("mach-glfw", .{});
+    const zig_clap_dep = b.dependency("zig-clap", .{});
+
     const exe = b.addExecutable(.{
         .name = "bp-jit",
         // In this case the main source file is merely a path, however, in more
@@ -26,18 +28,12 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    // Argument Parsing
-    exe.addAnonymousModule("clap", .{ .source_file = .{ .path = "lib/zig-clap/clap.zig" } });
-
-    // OpenGL 3.3 Bindings
-    exe.addAnonymousModule("gl", .{ .source_file = .{ .path = "lib/gl.zig" } });
-
-    // GLFW Bindings
-    exe.addModule("glfw", glfw.module(b));
-    try glfw.link(b, exe, .{});
+    exe.root_module.addImport("glfw", mach_glfw_dep.module("mach-glfw"));
+    exe.root_module.addImport("clap", zig_clap_dep.module("clap"));
+    exe.root_module.addAnonymousImport("gl", .{ .root_source_file = .{ .path = "lib/gl.zig" } });
 
     // DearImGui Bindings
-    const zgui_pkg = zgui.package(b, target, optimize, .{ .options = .{ .backend = .glfw_opengl3, .shared = true } });
+    const zgui_pkg = zgui.package(b, target, optimize, .{ .options = .{ .backend = .mach_opengl3, .shared = true } });
     zgui_pkg.link(exe);
 
     // This declares intent for the executable to be installed into the

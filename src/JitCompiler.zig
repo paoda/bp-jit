@@ -7,13 +7,11 @@ const HashMap = std.HashMap(u24, Block, Context, 80);
 const ArrayList = std.ArrayList;
 const log = std.log.scoped(.Jit);
 
-const JitFn = *const fn (*[BytePusher.mem_size]u8, u32) callconv(.SysV) u32;
-const Self = @This();
+const JitCompiler = @This();
+const JitFnPtr = *const fn (*[BytePusher.mem_size]u8, u32) callconv(.SysV) u32;
 
 code: ArrayList(u8),
 map: HashMap,
-
-allocator: Allocator,
 
 const Block = struct {
     mem: []align(std.mem.page_size) u8,
@@ -21,15 +19,14 @@ const Block = struct {
     vacant: bool = true,
 };
 
-pub fn init(allocator: Allocator) !Self {
+pub fn init(allocator: Allocator) !JitCompiler {
     return .{
         .map = HashMap.initContext(allocator, .{}),
         .code = try ArrayList(u8).initCapacity(allocator, 64), // smallest block is 40 instructions
-        .allocator = allocator,
     };
 }
 
-pub fn deinit(self: *Self) void {
+pub fn deinit(self: *JitCompiler, _: Allocator) void {
     self.code.deinit();
 
     var it = self.map.iterator();
@@ -48,10 +45,9 @@ pub fn deinit(self: *Self) void {
     }
 
     self.map.deinit();
-    self.* = undefined;
 }
 
-fn compile(self: *Self, bp: *const BytePusher) !Block {
+fn compile(self: *JitCompiler, bp: *const BytePusher) !Block {
     // Translate BytePusher Instructions to x86 assembly
     var instr_count: u32 = 0;
     var current_pc = bp.pc;
@@ -137,9 +133,12 @@ fn compile(self: *Self, bp: *const BytePusher) !Block {
         const alignment = std.mem.page_size;
 
         const ptr = try std.os.windows.VirtualAlloc(null, self.code.items.len, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-        break :blk @ptrCast([*]align(alignment) u8, @alignCast(alignment, ptr))[0..self.code.items.len];
+
+        const ret: [*]align(alignment) u8 = @ptrCast(@alignCast(ptr));
+        break :blk ret[0..self.code.items.len];
     };
-    std.mem.copy(u8, mem, self.code.items);
+
+    @memcpy(mem, self.code.items);
 
     return .{
         .mem = mem,
@@ -148,18 +147,18 @@ fn compile(self: *Self, bp: *const BytePusher) !Block {
     };
 }
 
-pub fn execute(self: *Self, bp: *BytePusher) u32 {
+pub fn execute(self: *JitCompiler, bp: *BytePusher) u32 {
     const pc = bp.pc;
 
-    var entry = self.map.getOrPut(pc) catch |e| panic("failed to access HashMap: {}", .{e});
+    const entry = self.map.getOrPut(pc) catch |e| panic("failed to access HashMap: {}", .{e});
     if (!entry.found_existing) {
         log.warn("cache miss. recompiling...", .{});
         entry.value_ptr.* = self.compile(bp) catch |e| panic("failed to compile block: {}", .{e});
     }
     const block = entry.value_ptr;
 
-    const fn_ptr = @ptrCast(JitFn, block.mem);
-    bp.pc = @intCast(u24, fn_ptr(bp.memory, pc));
+    const fn_ptr: JitFnPtr = @ptrCast(block.mem);
+    bp.pc = @as(u24, @intCast(fn_ptr(bp.memory, pc)));
 
     return block.cycle_count;
 }

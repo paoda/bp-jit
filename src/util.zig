@@ -1,16 +1,17 @@
 const std = @import("std");
+const Atomic = std.atomic.Value;
 
 pub const FpsTracker = struct {
     const Self = @This();
 
     fps: u32,
-    count: std.atomic.Atomic(u32),
+    count: Atomic(u32),
     timer: std.time.Timer,
 
     pub fn init() Self {
         return .{
             .fps = 0,
-            .count = std.atomic.Atomic(u32).init(0),
+            .count = Atomic(u32).init(0),
             .timer = std.time.Timer.start() catch unreachable,
         };
     }
