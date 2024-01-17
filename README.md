@@ -16,14 +16,14 @@ This application is run from the terminal. A typical command might look like: `.
 
 ### Building
 
-Most recently built on Zig [v0.11.0-dev.3258+7621e5693](https://github.com/ziglang/zig/tree/7621e5693)
+Most recently built on Zig [v2024.1.0-mach](https://github.com/ziglang/zig/tree/804cee3b9)
 
 ## Dependencies
 
 Dependency | Source
 --- | ---
 mach-glfw | <https://github.com/hexops/mach-glfw>
-zgui | [https://github.com/michal-z/zig-gamedev](https://github.com/michal-z/zig-gamedev/tree/cb46c095dcbf1e86361cde4d6d12ab32ef691842/libs/zgui)
+zgui | [https://github.com/michal-z/zig-gamedev](https://github.com/zig-gamedev/zig-gamedev/tree/51bf33b8eb3e8bf5d42f6192b49df5571923e6a0/libs/zgui)
 zig-clap | <https://github.com/Hejsil/zig-clap>
 `gl.zig` | <https://github.com/MasterQ32/zig-opengl>
 
