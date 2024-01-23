@@ -44,7 +44,7 @@ const jit = struct {
             cycles += bp.jit.execute(bp);
         }
 
-        bp.updateFrameBuffer(fb.get(.Guest));
+        bp.updateFrameBuffer(fb.get(.guest));
         fb.swap();
     }
 };

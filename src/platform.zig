@@ -2,50 +2,35 @@ const std = @import("std");
 const glfw = @import("glfw");
 const gl = @import("gl");
 const zgui = @import("zgui");
-
 const emu = @import("emu.zig");
 
 const Window = glfw.Window;
 const Key = glfw.Key;
 const Mods = glfw.Mods;
 const Action = glfw.Action;
+const GLuint = gl.GLuint;
 
 const Allocator = std.mem.Allocator;
 const BytePusher = @import("BytePusher.zig");
 const FpsTracker = @import("util.zig").FpsTracker;
 
-// zig fmt: off
-const vertices: [32]f32 = [_]f32{
-    // Positions        // Colours      // Texture Coords
-     1.0, -1.0, 0.0,    1.0, 0.0, 0.0,  1.0, 1.0, // Top Right
-     1.0,  1.0, 0.0,    0.0, 1.0, 0.0,  1.0, 0.0, // Bottom Right
-    -1.0,  1.0, 0.0,    0.0, 0.0, 1.0,  0.0, 0.0, // Bottom Left
-    -1.0, -1.0, 0.0,    1.0, 1.0, 0.0,  0.0, 1.0, // Top Left
-};
+const win_width = 1280;
+const win_height = 720;
 
-const indices: [6]u32 = [_]u32{
-    0, 1, 3, // First Triangle
-    1, 2, 3, // Second Triangle
-};
- // zig fmt: on
-
-const width = 1280;
-const height = 720;
+const bp_width = BytePusher.width;
+const bp_height = BytePusher.height;
 
 pub const Gui = struct {
-    const Self = @This();
-    const log = std.log.scoped(.Gui);
+    const log = std.log.scoped(.gui);
     const title = "BytePusher JIT";
 
     window: Window,
     framebuffer: FrameBuffer,
 
-    program_id: c_uint,
-
-    pub fn init(allocator: Allocator) !Self {
+    pub fn init(allocator: Allocator) !Gui {
         if (!glfw.init(.{})) exitln("failed to init glfw: {?s}", .{glfw.getErrorString()});
 
-        const window = glfw.Window.create(width, height, title, null, null, .{}) orelse exitln("failed to init glfw window: {?s}", .{glfw.getErrorString()});
+        const window = glfw.Window.create(win_width, win_height, title, null, null, .{}) orelse exitln("failed to init glfw window: {?s}", .{glfw.getErrorString()});
         glfw.makeContextCurrent(window);
         glfw.swapInterval(1); // enable vsync
 
@@ -59,7 +44,6 @@ pub const Gui = struct {
         return .{
             .window = window,
             .framebuffer = try FrameBuffer.init(allocator),
-            .program_id = compileShaders(),
         };
     }
 
@@ -67,29 +51,32 @@ pub const Gui = struct {
         return glfw.getProcAddress(proc_name);
     }
 
-    pub fn deinit(self: *Self, _: Allocator) void {
+    pub fn deinit(self: Gui, allocator: Allocator) void {
         // Deinit Imgui
         zgui.backend.deinit();
         zgui.deinit();
 
-        self.framebuffer.deinit();
-
-        // TODO: OpenGL Buffer Deallocations
-        gl.deleteProgram(self.program_id);
+        self.framebuffer.deinit(allocator);
 
         self.window.destroy();
         glfw.terminate();
-        self.* = undefined;
     }
 
-    pub fn run(self: *Self, bp: *BytePusher) !void {
+    pub fn run(self: *Gui, bp: *BytePusher) !void {
         self.window.setUserPointer(bp); // expose BytePusher to glfw callbacks
 
-        const obj_ids = generateBuffers();
-        const emu_tex_id = generateTexture(self.framebuffer.get(.Host));
+        const vao_id = opengl_impl.vao();
+        defer gl.deleteVertexArrays(1, &[_]GLuint{vao_id});
 
-        const out_tex_id = generateOutputTexture();
-        const fbo_id = try generateFrameBuffer(out_tex_id);
+        const emu_tex = opengl_impl.screenTex(self.framebuffer.get(.host));
+        const out_tex = opengl_impl.outTex();
+        defer gl.deleteTextures(2, &[_]GLuint{ emu_tex, out_tex });
+
+        const fbo_id = try opengl_impl.frameBuffer(out_tex);
+        defer gl.deleteFramebuffers(1, &fbo_id);
+
+        const prog_id = try opengl_impl.program(); // Dynamic Shaders?
+        defer gl.deleteProgram(prog_id);
 
         var quit = std.atomic.Value(bool).init(false);
         var tracker = FpsTracker.init();
@@ -99,76 +86,47 @@ pub const Gui = struct {
 
         var title_buf: [0x100]u8 = undefined;
 
-        const clear: [4]f32 = .{ 0.45, 0.55, 0.60, 1.00 };
-
         while (!self.window.shouldClose()) {
             glfw.pollEvents();
 
+            const dyn_title = std.fmt.bufPrintZ(&title_buf, "{s} | Emu: {}fps", .{ title, tracker.value() }) catch unreachable;
+            self.window.setTitle(dyn_title);
+
+            // Draw Bytepusher Screen to Texture
             {
                 gl.bindFramebuffer(gl.FRAMEBUFFER, fbo_id);
                 defer gl.bindFramebuffer(gl.FRAMEBUFFER, 0);
 
-                gl.viewport(0, 0, BytePusher.width, BytePusher.height);
-                self.drawBytePusherTexture(obj_ids, emu_tex_id);
+                gl.viewport(0, 0, bp_width, bp_height);
+                opengl_impl.drawScreen(emu_tex, prog_id, vao_id, self.framebuffer.get(.host));
             }
 
+            self.draw(out_tex);
+
             // Background Color
-            const size = self.window.getFramebufferSize();
-            gl.viewport(0, 0, @as(c_int, @intCast(size.width)), @as(c_int, @intCast(size.height)));
-            gl.clearColor(clear[0] * clear[3], clear[1] * clear[3], clear[2] * clear[3], clear[3]);
+            const size = zgui.io.getDisplaySize();
+            gl.viewport(0, 0, @intFromFloat(size[0]), @intFromFloat(size[1]));
+            gl.clearColor(0, 0, 0, 1.0);
             gl.clear(gl.COLOR_BUFFER_BIT);
 
-            zgui.backend.newFrame(width, height);
-            self.draw(out_tex_id);
             zgui.backend.draw();
-
             self.window.swapBuffers();
-
-            const dyn_title = std.fmt.bufPrintZ(&title_buf, "{s} | Emu: {}fps", .{ title, tracker.value() }) catch unreachable;
-            self.window.setTitle(dyn_title);
         }
 
         quit.store(true, .SeqCst);
     }
 
-    const ObjectIds = struct { c_uint, c_uint, c_uint };
-
-    fn drawBytePusherTexture(self: *Self, obj_ids: ObjectIds, tex_id: c_uint) void {
-        const buf: []const u8 = self.framebuffer.get(.Host);
-
-        gl.bindTexture(gl.TEXTURE_2D, tex_id);
-        defer gl.bindTexture(gl.TEXTURE_2D, 0);
-
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, BytePusher.width, BytePusher.height, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, buf.ptr);
-
-        // Bind VAO, EBO
-        const vao_id = obj_ids[0];
-        gl.bindVertexArray(vao_id);
-        defer gl.bindVertexArray(0);
-
-        const ebo_id = obj_ids[2];
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo_id);
-        defer gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, 0);
-
-        // Use compiled frag + vertex shader
-        gl.useProgram(self.program_id);
-        defer gl.useProgram(0);
-
-        gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, null);
-    }
-
-    fn draw(self: *Self, tex_id: c_uint) void {
+    fn draw(self: *Gui, tex_id: c_uint) void {
         _ = self;
+        zgui.backend.newFrame(win_width, win_height);
 
         {
             _ = zgui.begin("BytePusher Screen", .{ .flags = .{ .no_resize = true } });
             defer zgui.end();
 
             const args = .{
-                .w = BytePusher.width,
-                .h = BytePusher.height,
-                .uv0 = .{ 0.0, 1.0 },
-                .uv1 = .{ 1.0, 0.0 },
+                .w = bp_width,
+                .h = bp_height,
             };
 
             zgui.image(@ptrFromInt(tex_id), args);
@@ -194,148 +152,38 @@ pub const Gui = struct {
     }
 };
 
-fn compileShaders() c_uint {
-    // TODO: Panic on Shader Compiler Failure + Error Message
-    const vert_shader = @embedFile("shader/pixelbuf.vert");
-    const frag_shader = @embedFile("shader/pixelbuf.frag");
-
-    const vs = gl.createShader(gl.VERTEX_SHADER);
-    defer gl.deleteShader(vs);
-
-    gl.shaderSource(vs, 1, &[_][*c]const u8{vert_shader}, 0);
-    gl.compileShader(vs);
-
-    const fs = gl.createShader(gl.FRAGMENT_SHADER);
-    defer gl.deleteShader(fs);
-
-    gl.shaderSource(fs, 1, &[_][*c]const u8{frag_shader}, 0);
-    gl.compileShader(fs);
-
-    const program = gl.createProgram();
-    gl.attachShader(program, vs);
-    gl.attachShader(program, fs);
-    gl.linkProgram(program);
-
-    return program;
-}
-
-fn generateFrameBuffer(tex_id: c_uint) !c_uint {
-    var fbo_id: c_uint = undefined;
-    gl.genFramebuffers(1, &fbo_id);
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo_id);
-    defer gl.bindFramebuffer(gl.FRAMEBUFFER, 0);
-
-    gl.framebufferTexture(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, tex_id, 0);
-
-    const draw_buffers: [1]c_uint = .{gl.COLOR_ATTACHMENT0};
-    gl.drawBuffers(1, &draw_buffers);
-
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE)
-        return error.FrameBufferInitFailed;
-
-    return fbo_id;
-}
-
-fn generateOutputTexture() c_uint {
-    var tex_id: c_uint = undefined;
-    gl.genTextures(1, &tex_id);
-
-    gl.bindTexture(gl.TEXTURE_2D, tex_id);
-    defer gl.bindTexture(gl.TEXTURE_2D, 0);
-
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, BytePusher.width, BytePusher.height, 0, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, null);
-
-    return tex_id;
-}
-
-fn generateTexture(buf: []const u8) c_uint {
-    var tex_id: c_uint = undefined;
-    gl.genTextures(1, &tex_id);
-
-    gl.bindTexture(gl.TEXTURE_2D, tex_id);
-    defer gl.bindTexture(gl.TEXTURE_2D, 0);
-
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, BytePusher.width, BytePusher.height, 0, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, buf.ptr);
-
-    return tex_id;
-}
-
-fn generateBuffers() struct { c_uint, c_uint, c_uint } {
-    var vao_id: c_uint = undefined;
-    var vbo_id: c_uint = undefined;
-    var ebo_id: c_uint = undefined;
-    gl.genVertexArrays(1, &vao_id);
-    gl.genBuffers(1, &vbo_id);
-    gl.genBuffers(1, &ebo_id);
-
-    gl.bindVertexArray(vao_id);
-    defer gl.bindVertexArray(0);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, vbo_id);
-    defer gl.bindBuffer(gl.ARRAY_BUFFER, 0);
-
-    gl.bufferData(gl.ARRAY_BUFFER, @sizeOf(@TypeOf(vertices)), &vertices, gl.STATIC_DRAW);
-
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo_id);
-    defer gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, 0);
-
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, @sizeOf(@TypeOf(indices)), &indices, gl.STATIC_DRAW);
-
-    // Position
-    gl.vertexAttribPointer(0, 3, gl.FLOAT, gl.FALSE, 8 * @sizeOf(f32), null);
-    gl.enableVertexAttribArray(0);
-    // Colour
-    gl.vertexAttribPointer(1, 3, gl.FLOAT, gl.FALSE, 8 * @sizeOf(f32), @as(?*anyopaque, @ptrFromInt((3 * @sizeOf(f32)))));
-    gl.enableVertexAttribArray(1);
-    // Texture Coord
-    gl.vertexAttribPointer(2, 2, gl.FLOAT, gl.FALSE, 8 * @sizeOf(f32), @as(?*anyopaque, @ptrFromInt((6 * @sizeOf(f32)))));
-    gl.enableVertexAttribArray(2);
-
-    return .{ vao_id, vbo_id, ebo_id };
-}
-
 pub const FrameBuffer = struct {
-    const Self = @This();
-    const buf_size = BytePusher.width * BytePusher.height * @sizeOf(u32);
+    const buf_size = (bp_width * @sizeOf(u32)) * bp_height;
 
+    // TODO: Rework this
     layer: [2]*[buf_size]u8,
     buf: *[buf_size * 2]u8,
     current: u1,
 
-    allocator: Allocator,
+    // TODO: rename
+    const Destination = enum { guest, host };
 
-    const Destination = enum { Guest, Host };
-
-    pub fn init(allocator: Allocator) !Self {
-        const buf = try allocator.create([buf_size * 2]u8);
+    pub fn init(allocator: Allocator) !FrameBuffer {
+        const buf = try allocator.alignedAlloc(u8, @alignOf(u24), buf_size * 2);
         @memset(buf, 0);
 
         return .{
             .layer = [_]*[buf_size]u8{ buf[0..buf_size], buf[buf_size..(buf_size * 2)] },
-            .buf = buf,
+            .buf = buf[0 .. buf_size * 2],
             .current = 0,
-            .allocator = allocator,
         };
     }
 
-    pub fn deinit(self: *Self) void {
-        self.allocator.destroy(self.buf);
-        self.* = undefined;
+    pub fn deinit(self: FrameBuffer, allocator: Allocator) void {
+        allocator.destroy(self.buf);
     }
 
-    pub fn swap(self: *Self) void {
+    pub fn swap(self: *FrameBuffer) void {
         self.current = ~self.current;
     }
 
-    pub fn get(self: *Self, comptime dst: Destination) *[buf_size]u8 {
-        return self.layer[if (dst == .Guest) self.current else ~self.current];
+    pub fn get(self: *const FrameBuffer, comptime dst: Destination) *[buf_size]u8 {
+        return self.layer[if (dst == .guest) self.current else ~self.current];
     }
 };
 
@@ -343,3 +191,124 @@ fn exitln(comptime format: []const u8, args: anytype) noreturn {
     std.log.err(format, args);
     std.process.exit(1);
 }
+
+const opengl_impl = struct {
+    fn drawScreen(tex_id: GLuint, prog_id: GLuint, vao_id: GLuint, buf: []const u8) void {
+        gl.bindTexture(gl.TEXTURE_2D, tex_id);
+        defer gl.bindTexture(gl.TEXTURE_2D, 0);
+
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, bp_width, bp_height, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, buf.ptr);
+
+        // Bind VAO
+        gl.bindVertexArray(vao_id);
+        defer gl.bindVertexArray(0);
+
+        // Use compiled frag + vertex shader
+        gl.useProgram(prog_id);
+        defer gl.useProgram(0);
+
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 3);
+    }
+
+    fn program() !GLuint {
+        const vert_shader = @embedFile("shader/pixelbuf.vert");
+        const frag_shader = @embedFile("shader/pixelbuf.frag");
+
+        const vs = gl.createShader(gl.VERTEX_SHADER);
+        defer gl.deleteShader(vs);
+
+        gl.shaderSource(vs, 1, &[_][*c]const u8{vert_shader}, 0);
+        gl.compileShader(vs);
+
+        if (!shader.didCompile(vs)) return error.VertexCompileError;
+
+        const fs = gl.createShader(gl.FRAGMENT_SHADER);
+        defer gl.deleteShader(fs);
+
+        gl.shaderSource(fs, 1, &[_][*c]const u8{frag_shader}, 0);
+        gl.compileShader(fs);
+
+        if (!shader.didCompile(fs)) return error.FragmentCompileError;
+
+        const prog = gl.createProgram();
+        gl.attachShader(prog, vs);
+        gl.attachShader(prog, fs);
+        gl.linkProgram(prog);
+
+        return prog;
+    }
+
+    fn vao() GLuint {
+        var vao_id: GLuint = undefined;
+        gl.genVertexArrays(1, &vao_id);
+
+        return vao_id;
+    }
+
+    fn screenTex(buf: []const u8) GLuint {
+        var tex_id: GLuint = undefined;
+        gl.genTextures(1, &tex_id);
+
+        gl.bindTexture(gl.TEXTURE_2D, tex_id);
+        defer gl.bindTexture(gl.TEXTURE_2D, 0);
+
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, bp_width, bp_height, 0, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, buf.ptr);
+
+        return tex_id;
+    }
+
+    fn outTex() GLuint {
+        var tex_id: GLuint = undefined;
+        gl.genTextures(1, &tex_id);
+
+        gl.bindTexture(gl.TEXTURE_2D, tex_id);
+        defer gl.bindTexture(gl.TEXTURE_2D, 0);
+
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, bp_width, bp_height, 0, gl.RGBA, gl.UNSIGNED_INT_8_8_8_8, null);
+
+        return tex_id;
+    }
+
+    fn frameBuffer(tex_id: GLuint) !GLuint {
+        var fbo_id: GLuint = undefined;
+        gl.genFramebuffers(1, &fbo_id);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo_id);
+        defer gl.bindFramebuffer(gl.FRAMEBUFFER, 0);
+
+        gl.framebufferTexture(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, tex_id, 0);
+        gl.drawBuffers(1, &@as(GLuint, gl.COLOR_ATTACHMENT0));
+
+        if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE)
+            return error.FrameBufferObejctInitFailed;
+
+        return fbo_id;
+    }
+
+    const shader = struct {
+        const log = std.log.scoped(.shader);
+
+        fn didCompile(id: gl.GLuint) bool {
+            var success: gl.GLint = undefined;
+            gl.getShaderiv(id, gl.COMPILE_STATUS, &success);
+
+            if (success == 0) err(id);
+
+            return success == 1;
+        }
+
+        fn err(id: gl.GLuint) void {
+            const buf_len = 512;
+            var error_msg: [buf_len]u8 = undefined;
+
+            gl.getShaderInfoLog(id, buf_len, 0, &error_msg);
+            log.err("{s}", .{std.mem.sliceTo(&error_msg, 0)});
+        }
+    };
+};
