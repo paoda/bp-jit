@@ -33,7 +33,7 @@ pub fn build(b: *std.Build) !void {
     exe.root_module.addAnonymousImport("gl", .{ .root_source_file = .{ .path = "lib/gl.zig" } });
 
     // DearImGui Bindings
-    const zgui_pkg = zgui.package(b, target, optimize, .{ .options = .{ .backend = .mach_opengl3, .shared = true } });
+    const zgui_pkg = zgui.package(b, target, optimize, .{ .options = .{ .backend = .mach_glfw_opengl3, .shared = false } });
     zgui_pkg.link(exe);
 
     // This declares intent for the executable to be installed into the
