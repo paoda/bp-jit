@@ -1,5 +1,6 @@
 const std = @import("std");
 const glfw = @import("glfw");
+const sysaudio = @import("sysaudio");
 const gl = @import("gl");
 const zgui = @import("zgui");
 const emu = @import("emu.zig");
@@ -191,11 +192,6 @@ pub const FrameBuffer = struct {
         return self.buf[buf_size * multiplicand ..][0..buf_size];
     }
 };
-
-fn exitln(comptime format: []const u8, args: anytype) noreturn {
-    std.log.err(format, args);
-    std.process.exit(1);
-}
 
 const opengl_impl = struct {
     fn drawScreen(tex_id: GLuint, prog_id: GLuint, vao_id: GLuint, buf: []const u8) void {

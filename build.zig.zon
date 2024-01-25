@@ -6,7 +6,7 @@
         "build.zig.zon",
         "README.md",
         "lib",
-		"src",
+        "src",
     },
     .dependencies = .{
         .@"zig-clap" = .{
@@ -16,6 +16,10 @@
         .@"mach-glfw" = .{
             .url = "https://github.com/hexops/mach-glfw/archive/0ea4948b8b4a470284b8b72780e680321d7ffd29.tar.gz",
             .hash = "12204bfbc23adcbd3dafdd93dd2dafc71c08ad03073a509799deb5d2dfe45c2946fe",
+        },
+        .@"mach-sysaudio" = .{
+            .url = "https://github.com/hexops/mach-sysaudio/archive/8e4d73150af291d63a5390b157552ce0bbcd4a1d.tar.gz",
+            .hash = "12206c2ca0378bbc54721553e8167c037325e95e2791379fbe0e245a34334679dc90",
         },
         .glfw = .{
             .url = "https://pkg.machengine.org/glfw/7b1a45feeacf876428bfbd924d4aca9a9a158cd9.tar.gz",

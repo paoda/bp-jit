@@ -17,6 +17,7 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
 
     const mach_glfw_dep = b.dependency("mach-glfw", .{});
+    const mach_sysaudio_dep = b.dependency("mach-sysaudio", .{});
     const zig_clap_dep = b.dependency("zig-clap", .{});
 
     const exe = b.addExecutable(.{
@@ -29,8 +30,13 @@ pub fn build(b: *std.Build) !void {
     });
 
     exe.root_module.addImport("glfw", mach_glfw_dep.module("mach-glfw"));
+    exe.root_module.addImport("sysaudio", mach_sysaudio_dep.module("mach-sysaudio"));
     exe.root_module.addImport("clap", zig_clap_dep.module("clap"));
     exe.root_module.addAnonymousImport("gl", .{ .root_source_file = .{ .path = "lib/gl.zig" } });
+
+    // mach-glfw and mach-sysaudio stuff for macOS
+    @import("mach-glfw").addPaths(exe);
+    @import("mach-sysaudio").addPaths(exe);
 
     // DearImGui Bindings
     const zgui_pkg = zgui.package(b, target, optimize, .{ .options = .{ .backend = .mach_glfw_opengl3, .shared = false } });

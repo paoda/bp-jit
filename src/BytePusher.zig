@@ -1,5 +1,6 @@
 const std = @import("std");
 const JitCompiler = @import("JitCompiler.zig");
+const AudioQueue = @import("util.zig").AudioQueue;
 const Allocator = std.mem.Allocator;
 
 const BytePusher = @This();
@@ -13,6 +14,8 @@ pc: u24 = 0x000000,
 memory: *[mem_size]u8,
 jit: JitCompiler,
 
+audio_queue: AudioQueue,
+
 pub fn init(allocator: Allocator, path: []const u8) !BytePusher {
     const memory = try allocator.alignedAlloc(u8, @alignOf(u24), mem_size);
     errdefer allocator.free(memory);
@@ -25,14 +28,16 @@ pub fn init(allocator: Allocator, path: []const u8) !BytePusher {
     const len = try file.readAll(memory);
     log.info("rom size: {}B", .{len});
 
-    return .{
-        .memory = memory[0..mem_size],
-        .jit = try JitCompiler.init(allocator),
-    };
+    const audio_buf = try allocator.alloc(u8, 1 << 15);
+    errdefer allocator.free(audio_buf);
+
+    return .{ .memory = memory[0..mem_size], .jit = try JitCompiler.init(allocator), .audio_queue = AudioQueue.init(audio_buf) };
 }
 
 pub fn deinit(self: *BytePusher, allocator: Allocator) void {
     self.jit.deinit(allocator);
+
+    allocator.free(self.audio_queue.inner.buf);
     allocator.destroy(self.memory);
 }
 

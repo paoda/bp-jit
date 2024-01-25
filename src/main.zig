@@ -2,6 +2,7 @@ const std = @import("std");
 const clap = @import("clap");
 
 const Gui = @import("platform.zig").Gui;
+const Audio = @import("Audio.zig");
 const BytePusher = @import("BytePusher.zig");
 
 const params = clap.parseParamsComptime(
@@ -38,6 +39,10 @@ pub fn main() !void {
             var bp = try BytePusher.init(allocator, path);
             defer bp.deinit(allocator);
 
+            var audio_impl = try Audio.init(allocator, &bp.audio_queue);
+            defer audio_impl.deinit(allocator);
+
+            try audio_impl.start();
             try gui.run(&bp);
         },
     }
