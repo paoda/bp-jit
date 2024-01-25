@@ -12,7 +12,7 @@ const GLuint = gl.GLuint;
 
 const Allocator = std.mem.Allocator;
 const BytePusher = @import("BytePusher.zig");
-const FpsTracker = @import("util.zig").FpsTracker;
+const FrameCounter = @import("util.zig").FrameCounter;
 
 const win_width = 1280;
 const win_height = 720;
@@ -81,9 +81,9 @@ pub const Gui = struct {
         defer gl.deleteProgram(prog_id);
 
         var quit = std.atomic.Value(bool).init(false);
-        var tracker = FpsTracker.init();
+        var counter = try FrameCounter.start();
 
-        const thread = try std.Thread.spawn(.{}, emu.run, .{ bp, &self.framebuffer, &quit, &tracker });
+        const thread = try std.Thread.spawn(.{}, emu.run, .{ bp, &self.framebuffer, &quit, &counter });
         defer thread.join();
 
         while (!self.window.shouldClose()) {
@@ -98,7 +98,7 @@ pub const Gui = struct {
                 opengl_impl.drawScreen(emu_tex, prog_id, vao_id, self.framebuffer.get(.host));
             }
 
-            self.draw(out_tex, &tracker);
+            self.draw(out_tex, &counter);
 
             // Background Color
             const size = zgui.io.getDisplaySize();
@@ -113,7 +113,7 @@ pub const Gui = struct {
         quit.store(true, .SeqCst);
     }
 
-    fn draw(_: *Gui, tex_id: c_uint, tracker: *FpsTracker) void {
+    fn draw(_: *Gui, tex_id: c_uint, counter: *FrameCounter) void {
         zgui.backend.newFrame(win_width, win_height);
 
         {
@@ -132,7 +132,7 @@ pub const Gui = struct {
             _ = zgui.begin("Statistics", .{});
             defer zgui.end();
 
-            zgui.text("FPS: {:0>3}", .{tracker.value()});
+            zgui.text("FPS: {:0>3}", .{counter.lap()});
         }
     }
 
@@ -162,8 +162,6 @@ pub const Gui = struct {
 pub const FrameBuffer = struct {
     const buf_size = (bp_width * @sizeOf(u32)) * bp_height;
 
-    // TODO: Rework this
-    layer: [2]*[buf_size]u8,
     buf: *[buf_size * 2]u8,
     current: u1,
 
@@ -175,7 +173,6 @@ pub const FrameBuffer = struct {
         @memset(buf, 0);
 
         return .{
-            .layer = [_]*[buf_size]u8{ buf[0..buf_size], buf[buf_size..(buf_size * 2)] },
             .buf = buf[0 .. buf_size * 2],
             .current = 0,
         };
@@ -190,7 +187,8 @@ pub const FrameBuffer = struct {
     }
 
     pub fn get(self: *const FrameBuffer, comptime dst: Destination) *[buf_size]u8 {
-        return self.layer[if (dst == .guest) self.current else ~self.current];
+        const multiplicand: usize = if (dst == .guest) self.current else ~self.current;
+        return self.buf[buf_size * multiplicand ..][0..buf_size];
     }
 };
 

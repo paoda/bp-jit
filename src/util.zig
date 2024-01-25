@@ -1,31 +1,27 @@
 const std = @import("std");
 const Atomic = std.atomic.Value;
+const Timer = std.time.Timer;
 
-pub const FpsTracker = struct {
-    const Self = @This();
+pub const FrameCounter = struct {
+    elapsed: u32 = 0,
+    latch: u32 = 0,
+    timer: Timer,
 
-    fps: u32,
-    count: Atomic(u32),
-    timer: std.time.Timer,
-
-    pub fn init() Self {
-        return .{
-            .fps = 0,
-            .count = Atomic(u32).init(0),
-            .timer = std.time.Timer.start() catch unreachable,
-        };
+    pub fn start() !FrameCounter {
+        return .{ .timer = try std.time.Timer.start() };
     }
 
-    pub fn tick(self: *Self) void {
-        _ = self.count.fetchAdd(1, .Monotonic);
+    pub fn tick(self: *FrameCounter) void {
+        _ = @atomicRmw(u32, &self.elapsed, .Add, 1, .Monotonic);
     }
 
-    pub fn value(self: *Self) u32 {
+    /// Will report + reset the frame count if more than a second has passed
+    pub fn lap(self: *FrameCounter) u32 {
         if (self.timer.read() >= std.time.ns_per_s) {
-            self.fps = self.count.swap(0, .SeqCst);
             self.timer.reset();
+            self.latch = @atomicRmw(u32, &self.elapsed, .Xchg, 0, .Monotonic);
         }
 
-        return self.fps;
+        return self.latch;
     }
 };
