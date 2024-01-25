@@ -22,21 +22,27 @@ const bp_height = BytePusher.height;
 
 pub const Gui = struct {
     const log = std.log.scoped(.gui);
-    const title = "BytePusher JIT";
 
     window: Window,
     framebuffer: FrameBuffer,
 
     pub fn init(allocator: Allocator) !Gui {
-        if (!glfw.init(.{})) exitln("failed to init glfw: {?s}", .{glfw.getErrorString()});
+        if (!glfw.init(.{})) return error.glfw_init_failed;
+        glfw.setErrorCallback(handleError);
 
-        const window = glfw.Window.create(win_width, win_height, title, null, null, .{}) orelse exitln("failed to init glfw window: {?s}", .{glfw.getErrorString()});
+        const window = Window.create(win_width, win_height, "BytePusher JIT (?)", null, null, .{}) orelse return error.glfw_window_init_failed;
         glfw.makeContextCurrent(window);
         glfw.swapInterval(1); // enable vsync
 
-        window.setKeyCallback(keyCallback);
+        window.setKeyCallback(handleKeyInput);
 
-        try gl.load({}, getProcAddress);
+        const proc_address = struct {
+            fn inner(_: void, name: [:0]const u8) ?*const anyopaque {
+                return glfw.getProcAddress(name);
+            }
+        }.inner;
+
+        try gl.load({}, proc_address);
 
         zgui.init(allocator);
         zgui.backend.initWithGlSlVersion(window.handle, "#version 330 core");
@@ -45,10 +51,6 @@ pub const Gui = struct {
             .window = window,
             .framebuffer = try FrameBuffer.init(allocator),
         };
-    }
-
-    fn getProcAddress(_: void, proc_name: [:0]const u8) ?*const anyopaque {
-        return glfw.getProcAddress(proc_name);
     }
 
     pub fn deinit(self: Gui, allocator: Allocator) void {
@@ -84,13 +86,8 @@ pub const Gui = struct {
         const thread = try std.Thread.spawn(.{}, emu.run, .{ bp, &self.framebuffer, &quit, &tracker });
         defer thread.join();
 
-        var title_buf: [0x100]u8 = undefined;
-
         while (!self.window.shouldClose()) {
             glfw.pollEvents();
-
-            const dyn_title = std.fmt.bufPrintZ(&title_buf, "{s} | Emu: {}fps", .{ title, tracker.value() }) catch unreachable;
-            self.window.setTitle(dyn_title);
 
             // Draw Bytepusher Screen to Texture
             {
@@ -101,7 +98,7 @@ pub const Gui = struct {
                 opengl_impl.drawScreen(emu_tex, prog_id, vao_id, self.framebuffer.get(.host));
             }
 
-            self.draw(out_tex);
+            self.draw(out_tex, &tracker);
 
             // Background Color
             const size = zgui.io.getDisplaySize();
@@ -116,24 +113,30 @@ pub const Gui = struct {
         quit.store(true, .SeqCst);
     }
 
-    fn draw(self: *Gui, tex_id: c_uint) void {
-        _ = self;
+    fn draw(_: *Gui, tex_id: c_uint, tracker: *FpsTracker) void {
         zgui.backend.newFrame(win_width, win_height);
 
         {
-            _ = zgui.begin("BytePusher Screen", .{ .flags = .{ .no_resize = true } });
+            _ = zgui.begin("Screen", .{ .flags = .{ .no_resize = true } });
             defer zgui.end();
 
             const args = .{
-                .w = bp_width,
-                .h = bp_height,
+                .w = bp_width * 2,
+                .h = bp_height * 2,
             };
 
             zgui.image(@ptrFromInt(tex_id), args);
         }
+
+        {
+            _ = zgui.begin("Statistics", .{});
+            defer zgui.end();
+
+            zgui.text("FPS: {:0>3}", .{tracker.value()});
+        }
     }
 
-    fn keyCallback(window: Window, key: Key, scancode: i32, action: Action, mods: Mods) void {
+    fn handleKeyInput(window: Window, key: Key, scancode: i32, action: Action, mods: Mods) void {
         _ = scancode;
         _ = mods;
 
@@ -149,6 +152,10 @@ pub const Gui = struct {
             .release => key_ptr.* &= ~emu.key(key),
             else => {},
         }
+    }
+
+    fn handleError(code: glfw.ErrorCode, description: [:0]const u8) void {
+        log.err("glfw: {}: {s}\n", .{ code, description });
     }
 };
 

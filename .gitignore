@@ -5,3 +5,4 @@ zig-cache/
 bin/
 
 imgui.ini
+perf.data
