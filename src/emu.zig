@@ -46,24 +46,24 @@ fn resample(audio_queue: *AudioQueue, input: *[256]u8, target_freq: usize) void 
     const M = source_freq / gcd;
     const N = target_freq / gcd;
 
-    // M / N
-    const ratio = @as(f32, @floatFromInt(M)) / @as(f32, @floatFromInt(N));
     // N / M
     const inv_ratio = @as(f32, @floatFromInt(N)) / @as(f32, @floatFromInt(M));
 
     const target_len: usize = @intFromFloat(input.len * inv_ratio);
+    const len_ratio: f32 = (input.len - 1) / @as(f32, @floatFromInt(target_len));
 
     // std.debug.print("input  len: {}\n", .{input.len});
     // std.debug.print("target len: {}\n", .{target_len});
 
-    for (0..target_len - 3) |i| {
-        const n = @as(f32, @floatFromInt(i)) * ratio;
-        const ind: usize = @intFromFloat(std.math.floor(n));
-        std.debug.print("i: {} | n: {d} | ind: {}\n", .{ i, n, ind });
+    for (0..target_len) |i| {
+        const n = @as(f32, @floatFromInt(i)) * len_ratio;
+        const idx: usize = @intFromFloat(n);
+        const d = n - @as(f32, @floatFromInt(idx));
 
-        const d = n - @as(f32, @floatFromInt(ind));
+        const input_sample: f32 = @floatFromInt(input[idx]);
+        const input_sample_next: f32 = @floatFromInt(input[idx + 1]);
 
-        const sample: u8 = @intFromFloat((1 - d) * @as(f32, @floatFromInt(input[ind])) + d * @as(f32, @floatFromInt(input[ind + 1])));
+        const sample: u8 = @intFromFloat((1 - d) * input_sample + d * input_sample_next);
 
         audio_queue.inner.push(sample) catch @panic("oom");
     }
