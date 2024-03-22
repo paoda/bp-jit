@@ -1,5 +1,4 @@
 const std = @import("std");
-const zgui = @import("lib/zgui/build.zig");
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -19,6 +18,8 @@ pub fn build(b: *std.Build) !void {
     const mach_glfw_dep = b.dependency("mach-glfw", .{});
     const mach_sysaudio_dep = b.dependency("mach-sysaudio", .{});
     const zig_clap_dep = b.dependency("zig-clap", .{});
+    const zgui = b.dependency("zgui", .{ .shared = false, .with_implot = true, .backend = .mach_glfw_opengl3 });
+    const imgui = zgui.artifact("imgui");
 
     const exe = b.addExecutable(.{
         .name = "bp-jit",
@@ -32,15 +33,16 @@ pub fn build(b: *std.Build) !void {
     exe.root_module.addImport("glfw", mach_glfw_dep.module("mach-glfw"));
     exe.root_module.addImport("sysaudio", mach_sysaudio_dep.module("mach-sysaudio"));
     exe.root_module.addImport("clap", zig_clap_dep.module("clap"));
+    exe.root_module.addImport("zgui", zgui.module("root"));
+
     exe.root_module.addAnonymousImport("gl", .{ .root_source_file = .{ .path = "lib/gl.zig" } });
+
+    imgui.linkLibrary(b.dependency("glfw", .{}).artifact("glfw"));
+    exe.linkLibrary(imgui);
 
     // mach-glfw and mach-sysaudio stuff for macOS
     @import("mach-glfw").addPaths(exe);
     @import("mach-sysaudio").addPaths(exe);
-
-    // DearImGui Bindings
-    const zgui_pkg = zgui.package(b, target, optimize, .{ .options = .{ .backend = .mach_glfw_opengl3, .shared = false } });
-    zgui_pkg.link(exe);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default

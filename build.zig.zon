@@ -25,5 +25,9 @@
             .url = "https://pkg.machengine.org/glfw/7b1a45feeacf876428bfbd924d4aca9a9a158cd9.tar.gz",
             .hash = "122052f6e113bb8c74fceb80de8e92b6dce5792213ab703be2584bb638ec30f36edf",
         },
+        .zgui = .{
+            .url = "https://git.musuka.dev/paoda/zgui/archive/9099f4b05c18ec0dbd90be90c75b1f8cc36210fd.tar.gz",
+            .hash = "122089199ee82e2c5326f35a331ba11304a1599a74b9f1945a463ed2edd789eba6bd",
+        },
     },
 }
